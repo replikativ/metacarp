@@ -17,7 +17,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [macos-latest, ubuntu-latest]
+        include:
+          - os: macos-latest
+            style: false
+            skip_style: '1'
+          - os: ubuntu-latest
+            style: true
+            skip_style: '0'
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v6
@@ -32,6 +38,7 @@ jobs:
           carp-ref: 8e190f2c5e077cb078450ec83e26c67bc7d4be90
 
       - name: Install angler
+        if: matrix.style
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/carpentry-org/angler /tmp/angler
@@ -39,6 +46,7 @@ jobs:
           sudo install -m 755 /tmp/angler/out/angler /usr/local/bin/
 
       - name: Install carp-fmt
+        if: matrix.style
         run: |
           set -euo pipefail
           git clone --depth 1 https://github.com/carpentry-org/carp-fmt /tmp/carp-fmt
@@ -46,6 +54,9 @@ jobs:
           sudo install -m 755 /tmp/carp-fmt/out/carp-fmt /usr/local/bin/
 
       - name: Phase assurance
+        env:
+          CARP_SKIP_STYLE: ${{ matrix.skip_style }}
+          CARP_PHASE_JOBS: '2'
         run: |
           set -euo pipefail
           cd carp-compiler

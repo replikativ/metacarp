@@ -104,6 +104,8 @@ The assurance harness keeps the self-host honest:
 
 - `scripts/run-assurance.sh phase` runs every phase/session suite, lint, and
   formatting. Set `CARP_SKIP_STYLE=1` when the two style tools are unavailable.
+  Set `CARP_PHASE_JOBS=2` to run the independent module and root test groups
+  concurrently; CI uses this mode on both architectures.
 - `scripts/run-assurance.sh self` builds gen 1, runs the reference suite,
   checks the self-hosted fixed point, and compares expansion behavior.
 - `scripts/run-assurance.sh all` runs both groups and is the default. CI calls
