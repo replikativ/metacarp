@@ -38,26 +38,50 @@ jobs:
           # (carp-lang/Carp#1571) this compiler does not follow yet.
           carp-ref: 8e190f2c5e077cb078450ec83e26c67bc7d4be90
 
-      - name: Install angler
-        if: matrix.style
-        run: |
-          set -euo pipefail
-          git clone --depth 1 https://github.com/carpentry-org/angler /tmp/angler
-          (cd /tmp/angler && carp -b main.carp)
-          sudo install -m 755 /tmp/angler/out/angler /usr/local/bin/
+      - name: Cache Carp libraries
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/carp/libs
+          key: carp-libs-${{ runner.os }}-${{ runner.arch }}-v1
 
-      - name: Install carp-fmt
+      - name: Cache style tools
         if: matrix.style
+        id: style-tools-cache
+        uses: actions/cache@v5
+        with:
+          path: carp-compiler/.ci-tools/bin
+          key: style-tools-${{ runner.os }}-${{ runner.arch }}-carp-8e190f2c5e077cb078450ec83e26c67bc7d4be90-a5432454a7945e481da6255b1e34aacf5fb01d4c-2a3672781ec6126fa1a536903654e331b423d9b5
+
+      - name: Install angler and carp-fmt
+        if: matrix.style && steps.style-tools-cache.outputs.cache-hit != 'true'
         run: |
           set -euo pipefail
-          git clone --depth 1 https://github.com/carpentry-org/carp-fmt /tmp/carp-fmt
+          mkdir -p "$GITHUB_WORKSPACE/carp-compiler/.ci-tools/bin"
+
+          git init /tmp/angler
+          git -C /tmp/angler remote add origin https://github.com/carpentry-org/angler
+          git -C /tmp/angler fetch --depth 1 origin a5432454a7945e481da6255b1e34aacf5fb01d4c
+          git -C /tmp/angler checkout --detach FETCH_HEAD
+          (cd /tmp/angler && carp -b main.carp)
+          install -m 755 /tmp/angler/out/angler \
+            "$GITHUB_WORKSPACE/carp-compiler/.ci-tools/bin/"
+
+          git init /tmp/carp-fmt
+          git -C /tmp/carp-fmt remote add origin https://github.com/carpentry-org/carp-fmt
+          git -C /tmp/carp-fmt fetch --depth 1 origin 2a3672781ec6126fa1a536903654e331b423d9b5
+          git -C /tmp/carp-fmt checkout --detach FETCH_HEAD
           (cd /tmp/carp-fmt && carp -b main.carp)
-          sudo install -m 755 /tmp/carp-fmt/out/carp-fmt /usr/local/bin/
+          install -m 755 /tmp/carp-fmt/out/carp-fmt \
+            "$GITHUB_WORKSPACE/carp-compiler/.ci-tools/bin/"
+
+      - name: Add style tools to PATH
+        if: matrix.style
+        run: echo "$GITHUB_WORKSPACE/carp-compiler/.ci-tools/bin" >> "$GITHUB_PATH"
 
       - name: Phase assurance
         env:
           CARP_SKIP_STYLE: ${{ matrix.skip_style }}
-          CARP_PHASE_JOBS: '2'
+          CARP_PHASE_JOBS: ${{ runner.os == 'macOS' && '3' || '2' }}
         run: |
           set -euo pipefail
           cd carp-compiler
@@ -82,9 +106,15 @@ jobs:
           # (carp-lang/Carp#1571) this compiler does not follow yet.
           carp-ref: 8e190f2c5e077cb078450ec83e26c67bc7d4be90
 
+      - name: Cache Carp libraries
+        uses: actions/cache@v5
+        with:
+          path: ~/.cache/carp/libs
+          key: carp-libs-${{ runner.os }}-${{ runner.arch }}-v1
+
       - name: Self-host assurance
         env:
-          CARP_SELF_JOBS: '2'
+          CARP_SELF_JOBS: ${{ runner.os == 'macOS' && '3' || '2' }}
         run: |
           set -euo pipefail
           cd carp-compiler

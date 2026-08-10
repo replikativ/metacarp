@@ -14,7 +14,7 @@
 # Set CARP_CHECK_ERRORS=1 to also write a per-file divergence report
 # (our first diagnostic line vs the reference's expected first line) to
 # $out_root/error-text-report.txt — visibility without brittleness.
-# Set CARP_SELF_JOBS=2 to split the corpus across two shadow reference roots.
+# Set CARP_SELF_JOBS=2 or 3 to split the corpus across shadow reference roots.
 # Each worker owns its `out/Untitled`, preserving `-x` argv behavior without
 # sharing build artifacts.
 # Not covered: SDL examples, doc generation.
@@ -172,6 +172,8 @@ no_core_build() {
 }
 
 run_output_tests() {
+  selection=${1:-all}
+  index=0
   for file in \
     ./examples/functor.carp \
     ./examples/external_struct.carp \
@@ -182,7 +184,10 @@ run_output_tests() {
     ./examples/sumtypes.carp \
     ./examples/json_parser.carp
   do
-    check_output "$file" example-output
+    if selected_index "$selection" "$index"; then
+      check_output "$file" example-output
+    fi
+    index=$((index + 1))
   done
 
   for file in \
@@ -199,7 +204,10 @@ run_output_tests() {
     ./test/produces-output/explicit_lifetimes.carp \
     ./test/produces-output/repl.carp
   do
-    check_output "$file" output
+    if selected_index "$selection" "$index"; then
+      check_output "$file" output
+    fi
+    index=$((index + 1))
   done
 }
 
@@ -210,6 +218,9 @@ selected_index() {
     all) return 0 ;;
     even) [ $((index % 2)) -eq 0 ] ;;
     odd) [ $((index % 2)) -eq 1 ] ;;
+    third0) [ $((index % 3)) -eq 0 ] ;;
+    third1) [ $((index % 3)) -eq 1 ] ;;
+    third2) [ $((index % 3)) -eq 2 ] ;;
   esac
 }
 
@@ -279,54 +290,48 @@ prepare_worker_root() {
 }
 
 run_parallel() {
+  worker_count=$1
   worker_dir=$(mktemp -d "${TMPDIR:-/tmp}/carp-self-workers.XXXXXX")
-  worker_a="$worker_dir/a"
-  worker_b="$worker_dir/b"
-  prepare_worker_root "$worker_a"
-  prepare_worker_root "$worker_b"
-  : >"$out_root/a.counts"
-  : >"$out_root/b.counts"
+  lanes="a b"
+  [ "$worker_count" -eq 3 ] && lanes="a b c"
+  pids=""
 
-  CARP_COMPILER="$compiler" \
-  CARP_ROOT="$worker_a" \
-  CARP_CORE_DIR="$worker_a/core" \
-  CARP_SELF_SUITE_OUT="$out_root" \
-  CARP_SELF_JOBS=1 \
-  CARP_SELF_LANE=a \
-    "$script_dir/run-carp-suite-self.sh" &
-  a_pid=$!
+  for worker_lane in $lanes; do
+    worker_root="$worker_dir/$worker_lane"
+    prepare_worker_root "$worker_root"
+    : >"$out_root/$worker_lane.counts"
+    CARP_COMPILER="$compiler" \
+    CARP_ROOT="$worker_root" \
+    CARP_CORE_DIR="$worker_root/core" \
+    CARP_SELF_SUITE_OUT="$out_root" \
+    CARP_SELF_JOBS="$worker_count" \
+    CARP_SELF_LANE="$worker_lane" \
+      "$script_dir/run-carp-suite-self.sh" &
+    pids="$pids $!"
+  done
 
-  CARP_COMPILER="$compiler" \
-  CARP_ROOT="$worker_b" \
-  CARP_CORE_DIR="$worker_b/core" \
-  CARP_SELF_SUITE_OUT="$out_root" \
-  CARP_SELF_JOBS=1 \
-  CARP_SELF_LANE=b \
-    "$script_dir/run-carp-suite-self.sh" &
-  b_pid=$!
+  worker_failed=0
+  for worker_pid in $pids; do
+    wait "$worker_pid" || worker_failed=1
+  done
 
-  wait "$a_pid"
-  a_status=$?
-  wait "$b_pid"
-  b_status=$?
-
-  a_passed=0; a_failed=0; a_gaps=0
-  b_passed=0; b_failed=0; b_gaps=0
-  if [ -f "$out_root/a.counts" ]; then
-    read -r a_passed a_failed a_gaps <"$out_root/a.counts"
-  fi
-  if [ -f "$out_root/b.counts" ]; then
-    read -r b_passed b_failed b_gaps <"$out_root/b.counts"
-  fi
+  passed=0
+  failed=0
+  gaps=0
+  for worker_lane in $lanes; do
+    lane_passed=0; lane_failed=0; lane_gaps=0
+    if [ -f "$out_root/$worker_lane.counts" ]; then
+      read -r lane_passed lane_failed lane_gaps <"$out_root/$worker_lane.counts"
+    fi
+    passed=$((passed + lane_passed))
+    failed=$((failed + lane_failed))
+    gaps=$((gaps + lane_gaps))
+  done
   rm -rf "$worker_dir"
-
-  passed=$((a_passed + b_passed))
-  failed=$((a_failed + b_failed))
-  gaps=$((a_gaps + b_gaps))
   printf 'passed=%s failed=%s gaps=%s out=%s\n' \
     "$passed" "$failed" "$gaps" "$out_root"
 
-  if [ "$a_status" -ne 0 ] || [ "$b_status" -ne 0 ]; then
+  if [ "$worker_failed" -ne 0 ]; then
     return 1
   fi
 }
@@ -340,29 +345,48 @@ case "$lane" in
     : >"$out_root/error-text-report.txt"
     case "$jobs" in
       1)
-        run_output_tests
+        run_output_tests all
         run_regular_tests all
         run_compile_tests all
         printf 'passed=%s failed=%s gaps=%s out=%s\n' \
           "$passed" "$failed" "$gaps" "$out_root"
         [ "$failed" -eq 0 ] || suite_status=1
         ;;
-      2) run_parallel || suite_status=$? ;;
+      2) run_parallel 2 || suite_status=$? ;;
+      3) run_parallel 3 || suite_status=$? ;;
       *)
-        printf 'CARP_SELF_JOBS must be 1 or 2, got %s\n' "$jobs" >&2
+        printf 'CARP_SELF_JOBS must be 1, 2, or 3, got %s\n' "$jobs" >&2
         exit 2
         ;;
     esac
     ;;
   a)
-    run_output_tests
-    run_regular_tests even
-    run_compile_tests even
+    if [ "$jobs" -eq 2 ]; then
+      run_output_tests all
+      run_regular_tests even
+      run_compile_tests even
+    else
+      run_output_tests third0
+      run_regular_tests third0
+      run_compile_tests third0
+    fi
     finish_lane || suite_status=$?
     ;;
   b)
-    run_regular_tests odd
-    run_compile_tests odd
+    if [ "$jobs" -eq 2 ]; then
+      run_regular_tests odd
+      run_compile_tests odd
+    else
+      run_output_tests third1
+      run_regular_tests third1
+      run_compile_tests third1
+    fi
+    finish_lane || suite_status=$?
+    ;;
+  c)
+    run_output_tests third2
+    run_regular_tests third2
+    run_compile_tests third2
     finish_lane || suite_status=$?
     ;;
   *)

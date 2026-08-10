@@ -102,16 +102,19 @@ noise-sensitive CI timing threshold.
 
 The assurance harness keeps the self-host honest:
 
-- `scripts/run-assurance.sh phase` runs every phase/session suite, lint, and
-  formatting. Set `CARP_SKIP_STYLE=1` when the two style tools are unavailable.
-  Set `CARP_PHASE_JOBS=2` to run the independent module and root test groups
-  concurrently; CI uses this mode on both architectures.
+- `scripts/run-assurance.sh phase` runs lint and formatting before every
+  phase/session suite. Set `CARP_SKIP_STYLE=1` when the two style tools are
+  unavailable. Set `CARP_PHASE_JOBS=2` or `3` to run independent test groups
+  concurrently; CI uses all two Linux or three macOS runner cores.
 - `scripts/run-assurance.sh self` builds gen 1, runs the reference suite,
   checks the self-hosted fixed point, and compares expansion behavior. Set
-  `CARP_SELF_JOBS=2` to split the reference suite across isolated workers; CI
-  uses this mode on both architectures.
+  `CARP_SELF_JOBS=2` or `3` to split the reference suite across isolated
+  workers; CI uses all two Linux or three macOS runner cores.
 - `scripts/run-assurance.sh all` runs both groups and is the default. CI calls
   the same phase and self groups rather than maintaining its own command list.
+  CI caches the versioned Carp library checkouts on every architecture and the
+  pinned Ubuntu style-tool binaries; generated compiler and test outputs are
+  deliberately never cached.
 
 - `scripts/run-carp-suite-self.sh` runs the reference repository's own test
   suite (examples, produces-output diffs, `test/*.carp`, error-rejection

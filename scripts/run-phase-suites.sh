@@ -14,67 +14,79 @@ if [[ "$(uname -s)" == "Linux" ]]; then
 fi
 
 run_phase_test() {
-  # Carp's default executable path is relative to the current directory.
-  # Remove it so a failed compile cannot execute a stale test artifact.
-  rm -rf out
-  "$reference" -x "$1"
-}
-
-cd "$repo_root"
-
-run_module_tests() {
-  for directory in \
-    carp-graph carp-c-abi carp-primitives carp-surface carp-module carp-ct-env \
-    carp-ct-eval carp-ir carp-resolve carp-types carp-infer carp-specialize \
-    carp-backend carp-expand
-  do
-    (
-      cd "$repo_root/$directory"
-      for test_file in test/*.carp; do
-        printf '== %s/%s\n' "$directory" "$test_file"
-        run_phase_test "$test_file"
-      done
-    )
-  done
-}
-
-run_root_tests() {
+  test_dir=$1
+  test_file=$2
+  mode=$3
+  work_dir=$(mktemp -d "${TMPDIR:-/tmp}/carp-phase-test.XXXXXX")
   (
-    cd "$repo_root"
-    run_phase_test test/carp-compiler.carp
-    run_phase_test carp-session/test/carp-session.carp
-    run_phase_test carp-session/test/core.carp
-    rm -rf out
-    "$reference" -x --log-memory carp-session/test/memory.carp
+    trap 'rm -rf "$work_dir"' EXIT
+    if [[ "$test_dir" == . ]]; then
+      find "$repo_root" -mindepth 1 -maxdepth 1 ! -name out \
+        -exec ln -s {} "$work_dir/" \;
+      cd "$work_dir"
+    else
+      mkdir -p "$work_dir/$test_dir"
+      find "$repo_root" -mindepth 1 -maxdepth 1 \
+        ! -name out ! -name "$test_dir" -exec ln -s {} "$work_dir/" \;
+      find "$repo_root/$test_dir" -mindepth 1 -maxdepth 1 ! -name out \
+        -exec ln -s {} "$work_dir/$test_dir/" \;
+      cd "$work_dir/$test_dir"
+    fi
+    printf '== %s/%s\n' "$test_dir" "$test_file"
+    if [[ "$mode" == memory ]]; then
+      "$reference" -x --log-memory "$test_file"
+    else
+      "$reference" -x "$test_file"
+    fi
   )
 }
 
+# xargs invokes one fresh script process per task. Each task owns its working
+# directory and therefore its `out/Untitled`; the scheduler can distribute the
+# expensive compiler/session tests without introducing output races.
+if [[ "${1:-}" == --task ]]; then
+  if [[ "$#" -ne 4 ]]; then
+    printf 'internal usage: %s --task <dir> <file> <normal|memory>\n' "$0" >&2
+    exit 2
+  fi
+  run_phase_test "$2" "$3" "$4"
+  exit
+fi
+
+emit_task() {
+  printf '%s\0%s\0%s\0' "$1" "$2" "$3"
+}
+
+phase_tasks() {
+  # Start the four heaviest tasks first so the worker pool does not finish
+  # small module tests and leave one long session test as a serial tail.
+  emit_task . test/carp-compiler.carp normal
+  emit_task . carp-session/test/carp-session.carp normal
+  emit_task . carp-session/test/core.carp normal
+  emit_task . carp-session/test/memory.carp memory
+
+  for directory in \
+    carp-graph carp-c-abi carp-primitives carp-surface carp-module carp-ct-env \
+    carp-ct-eval carp-ir carp-resolve carp-types carp-infer carp-specialize \
+    carp-ownership carp-backend carp-expand
+  do
+    for test_file in "$repo_root/$directory"/test/*.carp; do
+      emit_task "$directory" "${test_file#"$repo_root/$directory/"}" normal
+    done
+  done
+}
+
 case "$jobs" in
-  1)
-    run_module_tests
-    run_root_tests
-    ;;
-  2)
-    run_module_tests &
-    module_pid=$!
-    run_root_tests &
-    root_pid=$!
-
-    set +e
-    wait "$module_pid"
-    module_status=$?
-    wait "$root_pid"
-    root_status=$?
-    set -e
-
-    if [[ "$module_status" -ne 0 || "$root_status" -ne 0 ]]; then
-      printf 'phase suites failed: modules=%d root=%d\n' \
-        "$module_status" "$root_status" >&2
-      exit 1
-    fi
-    ;;
+  1|2|3) ;;
   *)
-    printf 'CARP_PHASE_JOBS must be 1 or 2, got %s\n' "$jobs" >&2
+    printf 'CARP_PHASE_JOBS must be 1, 2, or 3, got %s\n' "$jobs" >&2
     exit 2
     ;;
 esac
+
+if ! phase_tasks \
+  | xargs -0 -n 3 -P "$jobs" "$script_dir/run-phase-suites.sh" --task
+then
+  printf 'phase suites failed\n' >&2
+  exit 1
+fi

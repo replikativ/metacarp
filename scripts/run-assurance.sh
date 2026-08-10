@@ -48,11 +48,11 @@ run_style_checks() {
 }
 
 run_phase() {
-  "$script_dir/run-phase-suites.sh"
   (
     cd "$repo_root"
     run_style_checks
   )
+  "$script_dir/run-phase-suites.sh"
 }
 
 run_self() {
