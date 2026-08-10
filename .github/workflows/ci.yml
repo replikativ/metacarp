@@ -25,6 +25,7 @@ jobs:
             style: true
             skip_style: '0'
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -68,6 +69,7 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest]
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
         with:
@@ -81,6 +83,8 @@ jobs:
           carp-ref: 8e190f2c5e077cb078450ec83e26c67bc7d4be90
 
       - name: Self-host assurance
+        env:
+          CARP_SELF_JOBS: '2'
         run: |
           set -euo pipefail
           cd carp-compiler

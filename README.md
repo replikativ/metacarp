@@ -107,7 +107,9 @@ The assurance harness keeps the self-host honest:
   Set `CARP_PHASE_JOBS=2` to run the independent module and root test groups
   concurrently; CI uses this mode on both architectures.
 - `scripts/run-assurance.sh self` builds gen 1, runs the reference suite,
-  checks the self-hosted fixed point, and compares expansion behavior.
+  checks the self-hosted fixed point, and compares expansion behavior. Set
+  `CARP_SELF_JOBS=2` to split the reference suite across isolated workers; CI
+  uses this mode on both architectures.
 - `scripts/run-assurance.sh all` runs both groups and is the default. CI calls
   the same phase and self groups rather than maintaining its own command list.
 

@@ -61,6 +61,24 @@
 #endif
 }")
 
+;; Build and execute actions may run concurrently in CI or editor hosts. Give
+;; each compiler process its own temporary C translation unit instead of
+;; racing through one process-global /tmp/carp-compiler-out.c.
+(deftemplate compiler-process-id (Fn [] Int) "int $NAME(void)" "$DECL {
+#if defined(_WIN32)
+  return (int)_getpid();
+#else
+  return (int)getpid();
+#endif
+}")
+
+(deftemplate compiler-remove-file
+             (Fn [(Ref String)] Unit)
+             "void $NAME(String const *path)"
+             "$DECL {
+  (void)remove(*path);
+}")
+
 (def version "0.1.0")
 
 (defn print-help []
@@ -688,13 +706,14 @@
 
 ; --- emitting / building ---
 
-(def temp-c "/tmp/carp-compiler-out.c")
 ;; `-x` builds to the reference compiler's default output path, so programs
 ;; observing their own argv (System.args) see the same value.
 (def temp-bin "out/Untitled")
 
-(defn write-temp-c [c]
-  (match (IO.write-file c temp-c)
+(defn temp-c-path [] (fmt "/tmp/carp-compiler-out-%d.c" (compiler-process-id)))
+
+(defn write-temp-c [c path]
+  (match (IO.write-file c path)
     (Result.Success _) true
     (Result.Error e)
       (do
@@ -702,7 +721,7 @@
         false)))
 
 ; clang the temp C into `binary`, linking against the runtime headers in core-dir.
-(defn clang-build [core-dir binary log-memory optimize]
+(defn clang-build [core-dir binary temp-c log-memory optimize]
   (let [cmd (String.concat
           &[@"clang "
             (if optimize @"-O3 -D NDEBUG " @"")
@@ -735,8 +754,14 @@
     (Maybe.Nothing)
       (do (IO.errorln "carp-compiler: -b requires --core <dir>") 1)
     (Maybe.Just dir)
-      (let [binary (match-ref output (Maybe.Just p) @p (Maybe.Nothing) @"a.out")]
-        (if (and (write-temp-c c) (clang-build dir &binary log-memory optimize))
+      (let-do [binary (match-ref output
+                 (Maybe.Just p) @p
+                 (Maybe.Nothing) @"a.out")
+               temp-c (temp-c-path)
+               built (and (write-temp-c c &temp-c)
+                          (clang-build dir &binary &temp-c log-memory optimize))]
+        (compiler-remove-file &temp-c)
+        (if built
           (do
             (IO.println
               &(String.append "carp-compiler: wrote executable " &binary))
@@ -748,16 +773,22 @@
     (Maybe.Nothing)
       (do (IO.errorln "carp-compiler: -x requires --core <dir>") 1)
     (Maybe.Just dir)
-      (do
+      (let-do [temp-c (temp-c-path)]
         (ignore (System.system "mkdir -p out"))
-        (if (and (write-temp-c c)
-                 (clang-build dir &(String.copy temp-bin) log-memory optimize))
-          ;; Normalize the raw wait status without losing signal termination;
-          ;; WEXITSTATUS alone turns an abort into success on Darwin and hid
-          ;; failing self-suite executables.
-          (let [status (System.system &(String.copy temp-bin))]
-            (compiler-system-exit-code status))
-          1))))
+        (let-do [built (and (write-temp-c c &temp-c)
+                            (clang-build dir
+                                         &(String.copy temp-bin)
+                                         &temp-c
+                                         log-memory
+                                         optimize))]
+          (compiler-remove-file &temp-c)
+          (if built
+            ;; Normalize the raw wait status without losing signal termination;
+            ;; WEXITSTATUS alone turns an abort into success on Darwin and hid
+            ;; failing self-suite executables.
+            (let [status (System.system &(String.copy temp-bin))]
+              (compiler-system-exit-code status))
+            1)))))
 
 (defn usage-hint []
   (do (IO.errorln "try 'carp-compiler --help' for usage.") (System.exit 2)))
