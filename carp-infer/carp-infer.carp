@@ -494,15 +494,15 @@ of its source definition.")
              ;; build a self-substitution such as 1 -> 1: `Type.apply` would
              ;; recurse forever and, more importantly, the two solver worlds
              ;; must remain disjoint.
-             ignored-type-watermark (for [i 0 n]
+             _ignored-type-watermark (for [i 0 n]
                (let [variable @(Array.unsafe-nth variables i)]
                  (when (Int.>= variable next-variable)
                    (set! next-variable (Int.inc variable)))))
-             ignored-lifetime-watermark (for [i 0 lifetime-count]
+             _ignored-lifetime-watermark (for [i 0 lifetime-count]
                (let [variable @(Array.unsafe-nth lifetimes i)]
                  (when (Int.>= variable next-variable)
                    (set! next-variable (Int.inc variable)))))
-             ignored-trace (match (IO.getenv "CARP_DEBUG_INSTANTIATE")
+             _ignored-trace (match (IO.getenv "CARP_DEBUG_INSTANTIATE")
                (Maybe.Just _)
                  (IO.errorln
                    &(fmt
@@ -657,7 +657,7 @@ of its source definition.")
           fresh (instantiate-tagged &scheme state "annot")
           expected (MonoType.copy (Box.peek (FreshType.type &fresh)))
           next-state (InferState.copy (FreshType.state &fresh))
-          ignored-probe (match (IO.getenv "CARP_DEBUG_INSTANTIATE")
+          _ignored-probe (match (IO.getenv "CARP_DEBUG_INSTANTIATE")
             (Maybe.Just _)
               (IO.errorln
                 &(fmt "annot-thread before=%d after=%d"
@@ -2246,15 +2246,15 @@ a warm inferred base and attaches source spans to failures.")
                              span)))))
 
   (defn module [core]
-    (let-do [ignored-base (set! *infer-base-bindings* [])]
+    (let-do [_ignored-base (set! *infer-base-bindings* [])]
       (module-with-bindings core)))
 
   (doc module-against "infers only `core` while seeding global schemes from a
 previously inferred warm base. The base's functions and expressions are not
 visited again.")
   (defn module-against [core base]
-    (let-do [ignored-base (set! *infer-base-bindings*
-                                (Array.copy (InferredModule.environment base)))]
+    (let-do [_ignored-base (set! *infer-base-bindings*
+                                 (Array.copy (InferredModule.environment base)))]
       (module-with-bindings core)))
 
   (doc append-environment "returns the compact warm environment formed by a
@@ -2284,7 +2284,7 @@ inference base.")
       (Type.empty-substitution)))
 
   (defn module-with-bindings [core]
-    (let-do [ignored-failure (set! *infer-failure-node* (Maybe.Nothing))
+    (let-do [_ignored-failure (set! *infer-failure-node* (Maybe.Nothing))
              solver (Type.solver)
              trace (InferenceTrace.init [] [] [])
              globals (InferGlobalEnvironment.init [] [] [])

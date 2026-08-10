@@ -294,10 +294,10 @@ binder in the body, first-of-a-name wins.")
       (match (render-type (Box.peek return-type))
         (Result.Success rendered-return)
           (let-do [buffer (StringBuf.create)
-                   ignored-a (StringBuf.append-str &buffer &rendered-return)
-                   ignored-b (StringBuf.append-char &buffer \space)
-                   ignored-c (StringBuf.append-str &buffer &(sanitize symbol))
-                   ignored-d (StringBuf.append-char &buffer \()
+                   _ignored-a (StringBuf.append-str &buffer &rendered-return)
+                   _ignored-b (StringBuf.append-char &buffer \space)
+                   _ignored-c (StringBuf.append-str &buffer &(sanitize symbol))
+                   _ignored-d (StringBuf.append-char &buffer \()
                    parameter-result (append-parameters! &buffer
                                                         arguments
                                                         parameters)]
@@ -412,8 +412,8 @@ binder in the body, first-of-a-name wins.")
             (BackendError.init
               @"recursive by-value nominal layouts are not supported"))
           (let-do [result (the (Result Unit BackendError) (Result.Success ()))
-                   ignored-visiting (Array.push-back! visiting
-                                                      (Box.init (MonoType.copy type)))
+                   _ignored-visiting (Array.push-back! visiting
+                                                       (Box.init (MonoType.copy type)))
                    n (Array.length constructors)]
             (for [i 0 n]
               (match-ref &result
@@ -757,7 +757,7 @@ concrete application. Each constructor receives its stable source-order tag.")
               (match (render-type (Box.peek result-type))
                 (Result.Success c-name)
                   (let-do [buffer (StringBuf.create)
-                           ignored-head (StringBuf.append-str &buffer &head)]
+                           _ignored-head (StringBuf.append-str &buffer &head)]
                     (StringBuf.append-str &buffer " {
   ")
                     (StringBuf.append-str &buffer &c-name)
@@ -836,7 +836,7 @@ signature and every emitted expression are in the unmanaged scalar subset.")
 (defn closure-env-typedef [captures env-type]
   (let-do [buffer (StringBuf.create)
            failure (the (Maybe BackendError) (Maybe.Nothing))
-           ignored-open (StringBuf.append-str &buffer "typedef struct { ")]
+           _ignored-open (StringBuf.append-str &buffer "typedef struct { ")]
     (for [i 0 (Array.length captures)]
       (match-ref &failure
         (Maybe.Nothing)
@@ -862,12 +862,12 @@ signature and every emitted expression are in the unmanaged scalar subset.")
       (match (render-type (Box.peek return-type))
         (Result.Success rendered-return)
           (let-do [buffer (StringBuf.create)
-                   ignored-a (StringBuf.append-str &buffer &rendered-return)
-                   ignored-b (StringBuf.append-char &buffer \space)
-                   ignored-c (StringBuf.append-str &buffer &(sanitize symbol))
-                   ignored-d (StringBuf.append-char &buffer \()
-                   ignored-e (StringBuf.append-str &buffer env-type)
-                   ignored-f (StringBuf.append-str &buffer "* _env")]
+                   _ignored-a (StringBuf.append-str &buffer &rendered-return)
+                   _ignored-b (StringBuf.append-char &buffer \space)
+                   _ignored-c (StringBuf.append-str &buffer &(sanitize symbol))
+                   _ignored-d (StringBuf.append-char &buffer \()
+                   _ignored-e (StringBuf.append-str &buffer env-type)
+                   _ignored-f (StringBuf.append-str &buffer "* _env")]
             ;; the env is always a parameter, so never let `append-parameters!`
             ;; emit its zero-argument "void" marker (which would fuse into
             ;; "_envvoid"); only append the regular parameters when present.
@@ -1054,9 +1054,9 @@ this callback and then frees the environment cell itself.")
                              &env-type)
           (Result.Success head)
             (let-do [buffer (StringBuf.create)
-                     ignored-head (StringBuf.append-str &buffer &head)
-                     ignored-open (StringBuf.append-str &buffer " {")
-                     ignored-nl (StringBuf.append-char &buffer \newline)
+                     _ignored-head (StringBuf.append-str &buffer &head)
+                     _ignored-open (StringBuf.append-str &buffer " {")
+                     _ignored-nl (StringBuf.append-char &buffer \newline)
                      failure (the (Maybe BackendError) (Maybe.Nothing))]
               (for [i 0 (Array.length captures)]
                 (match-ref &failure
@@ -1177,7 +1177,7 @@ with a leading environment pointer and captured-value unpacking.")
 (defn function-definition [constructors declaration]
   (match-ref declaration
     (BackendDeclaration.Function fn-symbol signature parameters body)
-      (let-do [ignored-context (set! *render-context* [(String.copy fn-symbol)])]
+      (let-do [_ignored-context (set! *render-context* [(String.copy fn-symbol)])]
         (if (renderable-signature? constructors (Box.peek signature))
           (match-ref (Box.peek signature)
             (MonoType.Function _ return-type)
@@ -1186,8 +1186,8 @@ with a leading environment pointer and captured-value unpacking.")
                   (prototype-head declaration))
                 (Result.Success head)
                   (let-do [buffer (StringBuf.create)
-                           ignored-head (StringBuf.append-str &buffer &head)
-                           ignored-open (StringBuf.append-str &buffer " {
+                           _ignored-head (StringBuf.append-str &buffer &head)
+                           _ignored-open (StringBuf.append-str &buffer " {
 ")
                            destination (ResultDestination.Return
                              (Box.init (MonoType.copy (Box.peek return-type))))
@@ -1367,7 +1367,7 @@ global definition.")
     0
     (let-do [score 0
              next (Array.copy visited)
-             ignored-next (Array.push-back! &next (String.copy symbol))
+             _ignored-next (Array.push-back! &next (String.copy symbol))
              declarations (BackendModule.declarations module)
              n (Array.length declarations)]
       (for [i 0 n]
@@ -1452,11 +1452,11 @@ cycles retain declaration order.")
               (set! maximum-score (greater-score maximum-score score))))
         _ ()))
     (let-do [buffer (StringBuf.create)
-             ignored-plain (clear-plain-locals!)
+             _ignored-plain (clear-plain-locals!)
              ;; the reference signature: argc/argv feed `System.args` before
              ;; any other global initializes. The tentative definition merges
              ;; with the extern declaration programs that read it emit.
-             ignored-open (StringBuf.append-str &buffer "Array System_args;
+             _ignored-open (StringBuf.append-str &buffer "Array System_args;
 void carp_init_globals(int argc, char** argv) {
   System_args.len = argc;
   System_args.data = argv;
@@ -1504,7 +1504,7 @@ selected by specialization.")
                          (PrimitiveIntComparison.GreaterEqual)
                            (String.copy ">=")
                          (PrimitiveIntComparison.NotEqual) (String.copy "!="))
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   return arg0 ")
                 (StringBuf.append-str &buffer &operator)
@@ -1517,7 +1517,7 @@ selected by specialization.")
             (PrimitiveTemplate.PointerCopy)
             (if (Int.= 0 (Array.length dependencies))
               (let-do [buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   return *arg0;
 }")
@@ -1530,7 +1530,7 @@ selected by specialization.")
             (PrimitiveTemplate.CollectionLength)
             (if (Int.= 0 (Array.length dependencies))
               (let-do [buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)
+                       _ignored-head (StringBuf.append-str &buffer &head)
                        behind-ref (match-ref (Box.peek signature)
                          (MonoType.Function length-arguments _)
                            (if (Int.= 1 (Array.length length-arguments))
@@ -1569,7 +1569,7 @@ selected by specialization.")
             (PrimitiveTemplate.FunctionStr)
             (if (Int.= 0 (Array.length dependencies))
               (let-do [buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   static String lambda = \"\\u03bb\";
   return String_copy(&lambda);
@@ -1581,7 +1581,7 @@ selected by specialization.")
             (PrimitiveTemplate.FunctionCopy _)
             (if (Int.= 0 (Array.length dependencies))
               (let-do [buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   if(arg0->env) {
     Lambda copy;
@@ -1600,7 +1600,7 @@ selected by specialization.")
             (PrimitiveTemplate.FunctionDelete _)
             (if (Int.= 0 (Array.length dependencies))
               (let-do [buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   if(arg0.delete) {
     ((void(*)(void*))arg0.delete)(arg0.env);
@@ -1620,8 +1620,8 @@ selected by specialization.")
                       (let [dependency (Array.unsafe-nth dependencies 0)
                             dependency-symbol (sanitize (BackendDependency.symbol dependency))]
                         (let-do [buffer (StringBuf.create)
-                                 ignored-head (StringBuf.append-str &buffer
-                                                                    &head)]
+                                 _ignored-head (StringBuf.append-str &buffer
+                                                                     &head)]
                           (StringBuf.append-str &buffer " {
   ")
                           (StringBuf.append-str &buffer &rendered-element)
@@ -1653,8 +1653,8 @@ selected by specialization.")
                             second-symbol (sanitize
                               (BackendDependency.symbol second-dependency))]
                         (let-do [buffer (StringBuf.create)
-                                 ignored-head (StringBuf.append-str &buffer
-                                                                    &head)]
+                                 _ignored-head (StringBuf.append-str &buffer
+                                                                     &head)]
                           (StringBuf.append-str &buffer " {
   ")
                           (StringBuf.append-str &buffer &rendered-pair)
@@ -1694,7 +1694,7 @@ selected by specialization.")
                          (fmt "String temp = %s(*arg0);" &dependency-symbol)
                          (fmt "String temp = %s(**arg0);" &dependency-symbol))
                        buffer (StringBuf.create)
-                       ignored-head (StringBuf.append-str &buffer &head)]
+                       _ignored-head (StringBuf.append-str &buffer &head)]
                 (StringBuf.append-str &buffer " {
   ")
                 (StringBuf.append-str &buffer &str-call)
@@ -1716,7 +1716,7 @@ selected by specialization.")
               (MonoType.Function box-delete-arguments _)
                 (if (Int.= 1 (Array.length box-delete-arguments))
                   (let-do [buffer (StringBuf.create)
-                           ignored-head (StringBuf.append-str &buffer &head)]
+                           _ignored-head (StringBuf.append-str &buffer &head)]
                     (StringBuf.append-str &buffer " {
   if (arg0) {
 ")
@@ -1749,8 +1749,8 @@ selected by specialization.")
                             (Box.peek (Array.unsafe-nth element-arguments 0)))
                           (Result.Success rendered-element)
                             (let-do [buffer (StringBuf.create)
-                                     ignored-head (StringBuf.append-str &buffer
-                                                                        &head)]
+                                     _ignored-head (StringBuf.append-str &buffer
+                                                                         &head)]
                               (StringBuf.append-str &buffer " {
 ")
                               (StringBuf.append-str &buffer "  if (arg0.data) {
@@ -1803,7 +1803,7 @@ selected by specialization.")
                                  (MonoType.Reference _ _) true
                                  _ false)
                                data (if by-reference @"arg0->data" @"arg0.data")
-                               ignored-head (StringBuf.append-str &buffer &head)]
+                               _ignored-head (StringBuf.append-str &buffer &head)]
                         (StringBuf.append-str &buffer " {
 ")
                         (when (Int.> (Array.length dependencies) 0)
@@ -1847,8 +1847,8 @@ selected by specialization.")
                             (Box.peek (Array.unsafe-nth element-arguments 0)))
                           (Result.Success rendered-element)
                             (let-do [buffer (StringBuf.create)
-                                     ignored-head (StringBuf.append-str &buffer
-                                                                        &head)]
+                                     _ignored-head (StringBuf.append-str &buffer
+                                                                         &head)]
                               (StringBuf.append-str &buffer " {
   int insertIndex = 0;
   for(int i = 0; i < arg1.len; ++i) {
@@ -1934,7 +1934,7 @@ selected by specialization.")
                                              &dependency-symbol
                                              &call-arg)
                                buffer (StringBuf.create)
-                               ignored-head (StringBuf.append-str &buffer &head)]
+                               _ignored-head (StringBuf.append-str &buffer &head)]
                         (StringBuf.append-str &buffer " {
   String temp = NULL;
   int tempsize = 0;
@@ -1978,8 +1978,8 @@ selected by specialization.")
                       (let [dependency (Array.unsafe-nth dependencies 0)
                             dependency-symbol (sanitize (BackendDependency.symbol dependency))]
                         (let-do [buffer (StringBuf.create)
-                                 ignored-head (StringBuf.append-str &buffer
-                                                                    &head)]
+                                 _ignored-head (StringBuf.append-str &buffer
+                                                                     &head)]
                           (StringBuf.append-str &buffer " {
   Array copy;
   copy.len = arg0->len;

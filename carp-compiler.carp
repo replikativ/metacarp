@@ -1123,8 +1123,8 @@ Returns nested generic instances for the worklist.")
                                         true)
                    ;; a per-instance str is derived, not user-written: record
                    ;; it so later instances of the same base are still derived.
-                   ignored-provenance (Array.push-back! &*fallback-str-ids*
-                                                        @(CoreRef.id &fn-ref))
+                   _ignored-provenance (Array.push-back! &*fallback-str-ids*
+                                                         @(CoreRef.id &fn-ref))
                    param-ref (CoreRef.init (next-id! cell) @"self" false)
                    branches (the (Array CoreMatchBranch) [])
                    cn (Array.length constructors)]
@@ -1828,7 +1828,7 @@ is the matched constructor's name; a body-less builtin would not link and the
 Test framework calls `str` on every asserted value. Types that already define
 their own `<T>.str` (e.g. via a user `derive`) are left alone.")
   (defn strs [core]
-    (let-do [ignored-reset (set! *fallback-str-ids* [])
+    (let-do [_ignored-reset (set! *fallback-str-ids* [])
              constructors (CoreModule.constructors core)
              new-functions (Array.copy (CoreModule.functions core))
              new-impls (Array.copy (CoreModule.implementations core))
@@ -1880,7 +1880,7 @@ their own `<T>.str` (e.g. via a user `derive`) are left alone.")
                                        true))
                      ;; a generic type's fallback is overridable by
                      ;; per-instance derivation: record its identity.
-                     ignored-provenance (when (generic-constructor? c)
+                     _ignored-provenance (when (generic-constructor? c)
                        (Array.push-back! &*fallback-str-ids*
                                          @(CoreRef.id &fn-ref)))
                      param-ref (CoreRef.init (next-id! &cell) @"self" false)]
@@ -2485,10 +2485,10 @@ before ownership so managed temporaries are freed correctly.")
   (private lift-body)
   (hidden lift-body)
   (defn lift-body [b counter]
-    (let-do [ignored (Array.aset! counter
-                                  1
-                                  (Int.inc
-                                    (max-eid (Box.peek (SpecializedBody.body b)))))]
+    (let-do [_ignored (Array.aset! counter
+                                   1
+                                   (Int.inc
+                                     (max-eid (Box.peek (SpecializedBody.body b)))))]
       (SpecializedBody.init @(SpecializedBody.specialization b)
                             (Array.copy (SpecializedBody.parameters b))
                             (Box.init
@@ -3332,14 +3332,14 @@ REPL results.")
   (hidden typedefs-owned)
   (defn typedefs-owned [core]
     (let-do [next (register-type-typedefs &core)
-             ignored (phase-mark! "phase: typedefs")]
+             _ignored (phase-mark! "phase: typedefs")]
       next))
 
   (private accessors-owned)
   (hidden accessors-owned)
   (defn accessors-owned [core]
     (let-do [next (Derive.accessors &core)
-             ignored (phase-mark! "phase: accessors")]
+             _ignored (phase-mark! "phase: accessors")]
       next))
 
   (private pair-refs-owned)
@@ -3350,27 +3350,27 @@ REPL results.")
   (hidden copies-owned)
   (defn copies-owned [core]
     (let-do [next (Derive.copies &core)
-             ignored (phase-mark! "phase: copies")]
+             _ignored (phase-mark! "phase: copies")]
       next))
 
   (private deletes-owned)
   (hidden deletes-owned)
   (defn deletes-owned [core]
     (let-do [next (Derive.deletes &core)
-             ignored (phase-mark! "phase: deletes")]
+             _ignored (phase-mark! "phase: deletes")]
       next))
 
   (private strs-owned)
   (hidden strs-owned)
   (defn strs-owned [core]
     (let-do [next (Derive.strs &core)
-             ignored (phase-mark! "phase: strs")] next))
+             _ignored (phase-mark! "phase: strs")] next))
 
   (private close-generics-owned)
   (hidden close-generics-owned)
   (defn close-generics-owned [core]
     (let-do [next (Derive.close-generics &core)
-             ignored (phase-mark! "phase: close-generics")]
+             _ignored (phase-mark! "phase: close-generics")]
       next))
 
   (private derive-core-owned)
@@ -3397,9 +3397,9 @@ preserving resolved user node identities, then gives every generated node a
 fresh ID from the session allocator and anchors it to the originating
 declaration when a fallback span is available.")
   (defn derive-module-for-inference-provenanced [resolved allocator fallback]
-    (let-do [ignored-preserve (set! *derive-preserve-expression-ids* true)
+    (let-do [_ignored-preserve (set! *derive-preserve-expression-ids* true)
              derived (derive-module-for-inference (ProvenancedCoreModule.core resolved))
-             ignored-restore (set! *derive-preserve-expression-ids* false)]
+             _ignored-restore (set! *derive-preserve-expression-ids* false)]
       (match derived
         (Result.Success core)
           (Result.Success
@@ -3426,7 +3426,7 @@ declaration when a fallback span is available.")
   (private render-owned)
   (hidden render-owned)
   (defn render-owned [backend]
-    (let-do [ignored (phase-mark! "phase: lowered")]
+    (let-do [_ignored (phase-mark! "phase: lowered")]
       (CBackend.executable-translation-unit &backend)))
 
   (doc compile-inferred-module "specializes, ownership-plans, lowers, and
@@ -3465,7 +3465,7 @@ inference for their resident environment.")
       (Result.Success expanded)
         (match (resolve-owned expanded)
           (Result.Success resolved)
-            (let-do [ignored-dump (match (IO.getenv "CARP_DEBUG_RESOLVED")
+            (let-do [_ignored-dump (match (IO.getenv "CARP_DEBUG_RESOLVED")
                        (Maybe.Just _)
                          (let-do [builtins (CoreModule.builtins &resolved)
                                   constructors (CoreModule.constructors &resolved)]
@@ -3501,11 +3501,11 @@ inference for their resident environment.")
                                              "duplicate global reference id %d after derivation"
                                              bad)))
                     (Maybe.Nothing)
-                      (match (let-do [ignored-phase-resolved (match (IO.getenv "CARP_DEBUG_PHASES")
+                      (match (let-do [_ignored-phase-resolved (match (IO.getenv "CARP_DEBUG_PHASES")
                                         (Maybe.Just _)
                                           (IO.errorln "phase: resolved+derived")
                                         (Maybe.Nothing) ())
-                                      ignored-fdump (match (IO.getenv "CARP_DEBUG_RESOLVED")
+                                      _ignored-fdump (match (IO.getenv "CARP_DEBUG_RESOLVED")
                                         (Maybe.Just _)
                                           (let [functions (CoreModule.functions &core)]
                                             (for [i 0 (Array.length functions)]
@@ -3518,7 +3518,7 @@ inference for their resident environment.")
                                         (Maybe.Nothing) ())]
                           (Infer.module &core))
                         (Result.Success inferred)
-                          (let-do [ignored-p7 (phase-mark! "phase: inferred")
+                          (let-do [_ignored-p7 (phase-mark! "phase: inferred")
                                    facts (OwnershipClassify.facts-from-module &core)
                                    seeds (Specialize.named-requests &core
                                                                     &inferred
@@ -3528,7 +3528,7 @@ inference for their resident environment.")
                                                       &facts
                                                       &seeds)
                               (Result.Success closed)
-                                (match (let-do [ignored-p8 (phase-mark! "phase: specialized")]
+                                (match (let-do [_ignored-p8 (phase-mark! "phase: specialized")]
                                     (if echo
                                       (echo-augment &core
                                                     &inferred

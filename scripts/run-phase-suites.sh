@@ -66,7 +66,7 @@ phase_tasks() {
   emit_task . carp-session/test/memory.carp memory
 
   for directory in \
-    carp-graph carp-c-abi carp-primitives carp-surface carp-module carp-ct-env \
+    carp-graph carp-c-abi carp-primitives carp-module carp-ct-env \
     carp-ct-eval carp-ir carp-resolve carp-types carp-infer carp-specialize \
     carp-ownership carp-backend carp-expand
   do
@@ -83,6 +83,11 @@ case "$jobs" in
     exit 2
     ;;
 esac
+
+# Carp's package cache is not safe for concurrent first installs. Run the
+# smallest carp-reader consumer before opening the worker pool; this is already
+# part of the suite, so the warm-up adds no duplicate compilation work.
+run_phase_test carp-surface test/carp-surface.carp normal
 
 if ! phase_tasks \
   | xargs -0 -n 3 -P "$jobs" "$script_dir/run-phase-suites.sh" --task

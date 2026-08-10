@@ -405,8 +405,8 @@ a macro explicitly returns it.")
                                                        &frame)
                             (Result.Success generated)
                               (let-do [next (SurfaceNode.copy &generated)
-                                       ignored-anchor (Surface.reanchor! &next
-                                                                         (SurfaceNode.span node))]
+                                       _ignored-anchor (Surface.reanchor! &next
+                                                                          (SurfaceNode.span node))]
                                 (expand-node &next
                                              macros
                                              state
@@ -585,8 +585,8 @@ happens to render identically.")
                                                          &frame)
                               (Result.Success generated)
                                 (let-do [next (SurfaceNode.copy &generated)
-                                         ignored-anchor (Surface.reanchor! &next
-                                                                           (SurfaceNode.span node))]
+                                         _ignored-anchor (Surface.reanchor! &next
+                                                                            (SurfaceNode.span node))]
                                   (Result.Success (Maybe.Just next)))
                               (Result.Error error)
                                 (Result.Error
@@ -615,7 +615,7 @@ Returns `Nothing` when no top-level form is a macro call.")
          [(Ref SurfaceModule) (Ref ExpandSnapshot)]
          (Result (Maybe SurfaceModule) CtError)))
   (defn expand-module-1-against [module snapshot]
-    (let-do [ignored-stack (CtEval.reset-load-stack!)
+    (let-do [_ignored-stack (CtEval.reset-load-stack!)
              scope (ExpandScope.copy (ExpandSnapshot.scope snapshot))
              macros (Array.copy (ExpandSnapshot.macros snapshot))
              state (CtState.copy (ExpandSnapshot.state snapshot))
@@ -1009,8 +1009,7 @@ Returns `Nothing` when no top-level form is a macro call.")
   (defn module-with-body [node body]
     (match-ref (SurfaceNode.form node)
       (SurfaceForm.List items)
-        (let-do [result (the (Array (Box SurfaceNode)) [])
-                 n (Array.length items)]
+        (let-do [result (the (Array (Box SurfaceNode)) [])]
           (for [i 0 2]
             (set! result
                   (Array.push-back result
@@ -1401,7 +1400,7 @@ Returns `Nothing` when no top-level form is a macro call.")
   (doc prepare-module-with "expands a base module once and retains its
 compile-time environment for subsequent transient expansions.")
   (defn prepare-module-with [module config]
-    (let-do [ignored-stack (CtEval.reset-load-stack!)
+    (let-do [_ignored-stack (CtEval.reset-load-stack!)
              state (CtEval.state)
              root (CtEval.root &state)
              scope (ExpandScope.init @"" root [])
@@ -1448,7 +1447,7 @@ discard it on failure.")
          [(Ref SurfaceModule) (Ref ExpandSnapshot)]
          (Result PreparedExpansion CtError)))
   (defn prepare-module-against [module snapshot]
-    (let-do [ignored-stack (CtEval.reset-load-stack!)
+    (let-do [_ignored-stack (CtEval.reset-load-stack!)
              scope (ExpandScope.copy (ExpandSnapshot.scope snapshot))
              macros (Array.copy (ExpandSnapshot.macros snapshot))
              state (CtState.copy (ExpandSnapshot.state snapshot))

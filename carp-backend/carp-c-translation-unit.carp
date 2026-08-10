@@ -51,8 +51,8 @@ artifact without an entry point.")
                               (match (system-includes module)
                                 (Result.Success includes)
                                   (let-do [buffer (StringBuf.create)
-                                           ignored-includes (StringBuf.append-str &buffer
-                                                                                  &includes)]
+                                           _ignored-includes (StringBuf.append-str &buffer
+                                                                                   &includes)]
                                     (unless-do (String.empty? &nominals)
                                       (StringBuf.append-char &buffer \newline)
                                       (StringBuf.append-str &buffer &nominals)
@@ -123,11 +123,11 @@ code) or `Unit`. `main` is nullary, so only those two mangled symbols can match.
 C entry point. This policy is requested explicitly by a compiler driver.")
 (defn entry-definition [module]
   (let-do [buffer (StringBuf.create)
-           ignored-open (StringBuf.append-str &buffer
-                                              "int main(int argc, char** argv) {
+           _ignored-open (StringBuf.append-str &buffer
+                                               "int main(int argc, char** argv) {
 ")
-           ignored-globals (StringBuf.append-str &buffer
-                                                 "  carp_init_globals(argc, argv);
+           _ignored-globals (StringBuf.append-str &buffer
+                                                  "  carp_init_globals(argc, argv);
 ")
            result (the (Result Unit BackendError) (Result.Success ()))
            roots (BackendModule.roots module)

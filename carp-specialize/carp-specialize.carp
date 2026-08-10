@@ -1507,8 +1507,7 @@ move it out of the borrowed container.")
   (private concrete-call)
   (hidden concrete-call)
   (defn concrete-call [core inferred call]
-    (let [reference (CallSite.reference call)
-          signature (Box.peek (CallSite.type call))]
+    (let [reference (CallSite.reference call)]
       (if (interface? (CoreModule.interfaces core) reference)
         (implementation-for core inferred call)
         (Result.Success @call))))
@@ -1578,7 +1577,7 @@ move it out of the borrowed container.")
                                                                &sites)
                  (Result.Success _) (Result.Success sites)
                  (Result.Error error) (Result.Error error)))
-             ignored-global-values (match global-values
+             _ignored-global-values (match global-values
                (Result.Success sites)
                  (let [site-count (Array.length &sites)]
                    (for [i 0 site-count]
@@ -2453,8 +2452,8 @@ reference compiler checks every definition.")
         (Maybe.Nothing) ())))
 
   (defn named-requests [core inferred names]
-    (let-do [ignored-index (prime-schemes! (InferredModule.environment inferred))
-             ignored-trace (prime-trace! inferred)
+    (let-do [_ignored-index (prime-schemes! (InferredModule.environment inferred))
+             _ignored-trace (prime-trace! inferred)
              result (the (Array SpecializationRequest) [])
              functions (CoreModule.functions core)
              builtins (CoreModule.builtins core)
@@ -2482,8 +2481,8 @@ argument by reference, scalar strs by value, so the by-reference form is
 probed first. Returns the request paired with by-ref?, or Nothing when no str
 implementation exists for the type.")
   (defn echo-request [core inferred type]
-    (let [ignored-index (prime-schemes! (InferredModule.environment inferred))
-          ignored-trace (prime-trace! inferred)
+    (let [_ignored-index (prime-schemes! (InferredModule.environment inferred))
+          _ignored-trace (prime-trace! inferred)
           by-ref (CallSite.init -1
                                 (PrimitiveRegistry.str-reference)
                                 (Box.init
@@ -2519,9 +2518,9 @@ implementation exists for the type.")
 (e.g. ownership delete demands), sharing one worklist so introduced calls use
 the same interface selection and instance deduplication as user calls.")
   (defn module-with [core inferred extra-requests]
-    (let-do [ignored-index (prime-schemes! (InferredModule.environment inferred))
-             ignored-trace (prime-trace! inferred)
-             ignored-buckets (buckets-reset! (CoreIR.max-declared-global-id core))
+    (let-do [_ignored-index (prime-schemes! (InferredModule.environment inferred))
+             _ignored-trace (prime-trace! inferred)
+             _ignored-buckets (buckets-reset! (CoreIR.max-declared-global-id core))
              instances (the (Array Specialization) [])
              failed false
              failure (String.copy "")

@@ -3125,8 +3125,8 @@ the primitive registry.")
     (let-do [table (the (Array (Pair String Int)) [])
              ;; per-module reset of the overload-synthesis channel filled
              ;; during body resolution.
-             ignored-interfaces (set! *overload-interfaces* [])
-             ignored-implementations (set! *overload-implementations* [])]
+             _ignored-interfaces (set! *overload-interfaces* [])
+             _ignored-implementations (set! *overload-implementations* [])]
       (let [functions (CollectedForms.functions collected)]
         (for [i 0 (Array.length functions)]
           (let [shape (Array.unsafe-nth functions i)]
@@ -3388,7 +3388,7 @@ back to plain reference resolution.")
   (defn identify-expression [node expression]
     (if *provenance-enabled*
       (let-do [id *provenance-next-node-id*
-               ignored-next (set! *provenance-next-node-id* (Int.inc id))
+               _ignored-next (set! *provenance-next-node-id* (Int.inc id))
                identified (CoreIR.with-expression-id expression id)
                origin (NodeProvenance.init id
                                            (source-span (SurfaceNode.span node)))]
@@ -3491,11 +3491,11 @@ back to plain reference resolution.")
             (let [shape (Array.unsafe-nth shapes i)
                   name (FunctionShape.name shape)
                   first-local-id next-local-id
-                  ignored-next (set! next-local-id
-                                     (Int.+ next-local-id
-                                            (Array.length (FunctionShape.parameters shape))))
-                  ignored-stamp (set! *resolve-stamp*
-                                      @(FunctionShape.stamp shape))]
+                  _ignored-next (set! next-local-id
+                                      (Int.+ next-local-id
+                                             (Array.length (FunctionShape.parameters shape))))
+                  _ignored-stamp (set! *resolve-stamp*
+                                       @(FunctionShape.stamp shape))]
               (match (global-by-name globals name)
                 (Maybe.Just reference)
                   (match (resolve-parameters (FunctionShape.parameters shape)
@@ -3537,7 +3537,7 @@ back to plain reference resolution.")
           (Result.Success values)
             (let [shape (Array.unsafe-nth shapes i)
                   name (ValueShape.name shape)
-                  ignored-stamp (set! *resolve-stamp* @(ValueShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp* @(ValueShape.stamp shape))]
               (match (global-by-name globals name)
                 (Maybe.Just reference)
                   (match (resolve-expression (Box.peek (ValueShape.body shape))
@@ -3574,7 +3574,7 @@ back to plain reference resolution.")
           (Result.Success builtins)
             (let [shape (Array.unsafe-nth shapes i)
                   name (TypedShape.name shape)
-                  ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
               (match (global-by-name globals name)
                 (Maybe.Just reference)
                   (match (resolve-type (Box.peek (TypedShape.signature shape)))
@@ -3602,7 +3602,7 @@ back to plain reference resolution.")
         (match-ref &result
           (Result.Success sources)
             (let [shape (Array.unsafe-nth shapes i)
-                  ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
               (match-ref (TypedShape.payload shape)
                 (Maybe.Just payload)
                   (match (global-by-name globals (TypedShape.name shape))
@@ -3637,7 +3637,7 @@ back to plain reference resolution.")
           (Result.Success signatures)
             (let [shape (Array.unsafe-nth shapes i)
                   name (TypedShape.name shape)
-                  ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
               (match (global-by-name globals name)
                 (Maybe.Just reference)
                 (match (resolve-type (Box.peek (TypedShape.signature shape)))
@@ -3691,8 +3691,8 @@ back to plain reference resolution.")
              n (Array.length shapes)]
       (for [i 0 n]
         (let-do [shape (Array.unsafe-nth shapes i)
-                 ignored-stamp (set! *resolve-stamp*
-                                     @(TypeDeclarationShape.stamp shape))]
+                 _ignored-stamp (set! *resolve-stamp*
+                                      @(TypeDeclarationShape.stamp shape))]
           (set! result
                 (Array.push-back result
                                  (CoreTypeDeclaration.init
@@ -4141,8 +4141,8 @@ distinct identities.")
             (let [event (Array.unsafe-nth &*type-decl-events* i)
                   form (Box.peek (TypeDeclEvent.form event))
                   gen-name (event-generation-name i)
-                  ignored-stamp (set! *resolve-stamp*
-                                      @(TypeDeclEvent.stamp event))]
+                  _ignored-stamp (set! *resolve-stamp*
+                                       @(TypeDeclEvent.stamp event))]
               (cond
                 (declaration? form @"deftype")
                   (match (add-constructors-from-deftype state form &gen-name)
@@ -4299,8 +4299,8 @@ distinct identities.")
           (Result.Success declarations)
             (let [event (Array.unsafe-nth &*type-decl-events* i)
                   form (Box.peek (TypeDeclEvent.form event))
-                  ignored-stamp (set! *resolve-stamp*
-                                      @(TypeDeclEvent.stamp event))]
+                  _ignored-stamp (set! *resolve-stamp*
+                                       @(TypeDeclEvent.stamp event))]
               (when (declaration? form @"deftype")
                 (let [gen-name (event-generation-name i)]
                   (match (constructor-declarations-from-deftype form
@@ -4327,7 +4327,7 @@ distinct identities.")
           (Result.Success interfaces)
             (let [shape (Array.unsafe-nth shapes i)
                   name (TypedShape.name shape)
-                  ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
               (match (first-global-by-name globals name)
                 (Maybe.Just reference)
                   (match (resolve-type (Box.peek (TypedShape.signature shape)))
@@ -4363,8 +4363,8 @@ distinct identities.")
             (let [shape (Array.unsafe-nth shapes i)
                   interface-name (ImplementationShape.interface-name shape)
                   implementation-name (ImplementationShape.implementation-name shape)
-                  ignored-stamp (set! *resolve-stamp*
-                                      @(ImplementationShape.stamp shape))]
+                  _ignored-stamp (set! *resolve-stamp*
+                                       @(ImplementationShape.stamp shape))]
               (match (first-global-by-name globals interface-name)
                 (Maybe.Just interface)
                   (match (global-by-name globals implementation-name)
@@ -4454,8 +4454,8 @@ name-matched function that does not fit the interface is never selected.")
         (match-ref &result
           (Result.Success expressions)
             (let [scoped (Array.unsafe-nth nodes i)
-                  ignored-stamp (set! *resolve-stamp*
-                                      @(ScopedExpression.stamp scoped))]
+                  _ignored-stamp (set! *resolve-stamp*
+                                       @(ScopedExpression.stamp scoped))]
               (match (resolve-expression
                   (Box.peek (ScopedExpression.node scoped))
                   &locals
@@ -4477,7 +4477,8 @@ name-matched function that does not fit the interface is never selected.")
       (let [functions (CollectedForms.functions collected)]
         (for [i 0 (Array.length functions)]
           (let [shape (Array.unsafe-nth functions i)
-                ignored-stamp (set! *resolve-stamp* @(FunctionShape.stamp shape))]
+                _ignored-stamp (set! *resolve-stamp*
+                                     @(FunctionShape.stamp shape))]
             (match (global-by-name globals (FunctionShape.name shape))
               (Maybe.Just reference)
                 (record-binding! &reference (FunctionShape.span shape) true)
@@ -4485,7 +4486,7 @@ name-matched function that does not fit the interface is never selected.")
       (let [values (CollectedForms.values collected)]
         (for [i 0 (Array.length values)]
           (let [shape (Array.unsafe-nth values i)
-                ignored-stamp (set! *resolve-stamp* @(ValueShape.stamp shape))]
+                _ignored-stamp (set! *resolve-stamp* @(ValueShape.stamp shape))]
             (match (global-by-name globals (ValueShape.name shape))
               (Maybe.Just reference)
                 (record-binding! &reference (ValueShape.span shape) true)
@@ -4493,7 +4494,7 @@ name-matched function that does not fit the interface is never selected.")
       (let [builtins (CollectedForms.builtins collected)]
         (for [i 0 (Array.length builtins)]
           (let [shape (Array.unsafe-nth builtins i)
-                ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
             (match (global-by-name globals (TypedShape.name shape))
               (Maybe.Just reference)
                 (record-binding! &reference (TypedShape.span shape) true)
@@ -4501,7 +4502,7 @@ name-matched function that does not fit the interface is never selected.")
       (let [interfaces (CollectedForms.interfaces collected)]
         (for [i 0 (Array.length interfaces)]
           (let [shape (Array.unsafe-nth interfaces i)
-                ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
+                _ignored-stamp (set! *resolve-stamp* @(TypedShape.stamp shape))]
             (match (first-global-by-name globals (TypedShape.name shape))
               (Maybe.Just reference)
                 (record-binding! &reference (TypedShape.span shape) true)
@@ -4537,30 +4538,30 @@ name-matched function that does not fit the interface is never selected.")
   (doc module "lowers expanded surface syntax to resolved core IR using the
 historical owner-relative expression IDs.")
   (defn module [surface]
-    (let-do [ignored-provenance (set! *provenance-enabled* false)
-             ignored-globals (set! *resolve-seed-globals*
-                                   (PrimitiveRegistry.globals))
-             ignored-imports (set! *resolve-seed-imports* [])
-             ignored-reuse (set! *resolve-reuse-globals* [])]
+    (let-do [_ignored-provenance (set! *provenance-enabled* false)
+             _ignored-globals (set! *resolve-seed-globals*
+                                    (PrimitiveRegistry.globals))
+             _ignored-imports (set! *resolve-seed-imports* [])
+             _ignored-reuse (set! *resolve-reuse-globals* [])]
       (module-inner surface)))
 
   (doc module-with-provenance "resolves caller-identified syntax with node IDs
 from a caller-owned monotonic allocator, returning the core IR and source map.")
   (defn module-with-provenance [sourced allocator]
-    (let-do [ignored-globals (set! *resolve-seed-globals*
-                                   (PrimitiveRegistry.globals))
-             ignored-imports (set! *resolve-seed-imports* [])
-             ignored-reuse (set! *resolve-reuse-globals* [])]
+    (let-do [_ignored-globals (set! *resolve-seed-globals*
+                                    (PrimitiveRegistry.globals))
+             _ignored-imports (set! *resolve-seed-imports* [])
+             _ignored-reuse (set! *resolve-reuse-globals* [])]
       (module-with-provenance-seeded sourced allocator)))
 
   (doc module-with-provenance-against "resolves caller syntax against a warm
 base snapshot without collecting or resolving the base module again.")
   (defn module-with-provenance-against [sourced allocator snapshot]
-    (let-do [ignored-globals (set! *resolve-seed-globals*
-                                   (Array.copy (ResolveSnapshot.globals snapshot)))
-             ignored-imports (set! *resolve-seed-imports*
-                                   (Array.copy (ResolveSnapshot.imports snapshot)))
-             ignored-reuse (set! *resolve-reuse-globals* [])]
+    (let-do [_ignored-globals (set! *resolve-seed-globals*
+                                    (Array.copy (ResolveSnapshot.globals snapshot)))
+             _ignored-imports (set! *resolve-seed-imports*
+                                    (Array.copy (ResolveSnapshot.imports snapshot)))
+             _ignored-reuse (set! *resolve-reuse-globals* [])]
       (module-with-provenance-seeded sourced allocator)))
 
   (doc module-with-provenance-against-reusing "resolves caller syntax against
@@ -4568,33 +4569,33 @@ a warm snapshot while retaining explicitly supplied compatible definition
 identities. Callers must only provide references whose name and definition kind
 match the replacement being resolved.")
   (defn module-with-provenance-against-reusing [sourced allocator snapshot reuse]
-    (let-do [ignored-globals (set! *resolve-seed-globals*
-                                   (Array.copy (ResolveSnapshot.globals snapshot)))
-             ignored-imports (set! *resolve-seed-imports*
-                                   (Array.copy (ResolveSnapshot.imports snapshot)))
-             ignored-reuse (set! *resolve-reuse-globals* (Array.copy reuse))
+    (let-do [_ignored-globals (set! *resolve-seed-globals*
+                                    (Array.copy (ResolveSnapshot.globals snapshot)))
+             _ignored-imports (set! *resolve-seed-imports*
+                                    (Array.copy (ResolveSnapshot.imports snapshot)))
+             _ignored-reuse (set! *resolve-reuse-globals* (Array.copy reuse))
              result (module-with-provenance-seeded sourced allocator)
-             ignored-clear (set! *resolve-reuse-globals* [])]
+             _ignored-clear (set! *resolve-reuse-globals* [])]
       result))
 
   (defn module-with-provenance-seeded [sourced allocator]
     (let-do [start (IdAllocator.next-up! allocator)
-             ignored-enabled (set! *provenance-enabled* true)
-             ignored-source (set! *provenance-source-id*
-                                  (String.copy
-                                    (SourceInput.id (SourcedSurfaceModule.input sourced))))
-             ignored-next (set! *provenance-next-node-id* start)
-             ignored-nodes (set! *provenance-nodes* [])
-             ignored-bindings (set! *provenance-bindings* [])
-             ignored-definitions (set! *provenance-definitions* [])
+             _ignored-enabled (set! *provenance-enabled* true)
+             _ignored-source (set! *provenance-source-id*
+                                   (String.copy
+                                     (SourceInput.id (SourcedSurfaceModule.input sourced))))
+             _ignored-next (set! *provenance-next-node-id* start)
+             _ignored-nodes (set! *provenance-nodes* [])
+             _ignored-bindings (set! *provenance-bindings* [])
+             _ignored-definitions (set! *provenance-definitions* [])
              result (module-inner (SourcedSurfaceModule.module sourced))
              provenance (CoreProvenance.init (Array.copy &*provenance-nodes*)
                                              (Array.copy &*provenance-bindings*)
                                              (Array.copy &*provenance-definitions*))
-             ignored-allocator (Array.aset! (IdAllocator.cell allocator)
-                                            0
-                                            *provenance-next-node-id*)
-             ignored-disabled (set! *provenance-enabled* false)]
+             _ignored-allocator (Array.aset! (IdAllocator.cell allocator)
+                                             0
+                                             *provenance-next-node-id*)
+             _ignored-disabled (set! *provenance-enabled* false)]
       (match result
         (Result.Success core)
           (Result.Success (ProvenancedCoreModule.init core provenance))
@@ -4656,28 +4657,28 @@ guessed at.")
     ;; per-module reset of the visibility channel, which `collect` fills.
     ;; (The overload channel is reset later, in populate-arities!, which runs
     ;; AFTER collection — resetting private names there would wipe them.)
-    (let-do [ignored-private (set! *private-names* [])
-             ignored-stamp (set! *type-decl-stamp* 0)
-             ignored-events (set! *type-decl-events* [])
-             ignored-site-stamp (set! *resolve-stamp* 0)]
+    (let-do [_ignored-private (set! *private-names* [])
+             _ignored-stamp (set! *type-decl-stamp* 0)
+             _ignored-events (set! *type-decl-events* [])
+             _ignored-site-stamp (set! *resolve-stamp* 0)]
       (match (collect-with-generations (SurfaceModule.forms surface))
         (Result.Success collected)
         ;; the constructor passes resolve plain (= last-generation) names, so
         ;; they run at the maximum stamp; body passes re-set it per shape.
-        (let-do [ignored-max-stamp (set! *resolve-stamp* *type-decl-stamp*)]
+        (let-do [_ignored-max-stamp (set! *resolve-stamp* *type-decl-stamp*)]
           (match (collect-constructors (CollectedForms.globals &collected))
             (Result.Success constructor-state)
               (let-do [all-globals (Array.copy
                          (ResolvedConstructors.globals &constructor-state))
                        constructor-builtins (Array.copy
                          (ResolvedConstructors.builtins &constructor-state))
-                       ignored-arities (populate-arities! &collected
-                                                          &constructor-builtins)
-                       ignored-provenance (record-collected-definitions! &collected
-                                                                         &all-globals)
-                       ignored-snapshot (set! *last-resolve-snapshot*
-                                              (ResolveSnapshot.init (Array.copy &all-globals)
-                                                                    (Array.copy (CollectedForms.imports &collected))))
+                       _ignored-arities (populate-arities! &collected
+                                                           &constructor-builtins)
+                       _ignored-provenance (record-collected-definitions! &collected
+                                                                          &all-globals)
+                       _ignored-snapshot (set! *last-resolve-snapshot*
+                                               (ResolveSnapshot.init (Array.copy &all-globals)
+                                                                     (Array.copy (CollectedForms.imports &collected))))
                        type-declarations (resolve-type-declarations
                          (CollectedForms.type-declarations &collected))
                        constructor-declarations (Array.copy

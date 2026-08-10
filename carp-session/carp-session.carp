@@ -578,10 +578,10 @@ traces retained once by `CompilerSession`.")
              definitions (Array.copy (SessionOverlay.definitions overlay))
              dependencies (Array.copy (SessionOverlay.dependencies overlay))
              references (Array.copy (SessionOverlay.references overlay))
-             ignored-input (Array.push-back! &inputs (SourceInput.copy input))
-             ignored-definition (Array.push-back! &definitions info)
-             ignored-dependency (Array.push-back! &dependencies [])
-             ignored-reference (Array.push-back! &references (Maybe.Nothing))]
+             _ignored-input (Array.push-back! &inputs (SourceInput.copy input))
+             _ignored-definition (Array.push-back! &definitions info)
+             _ignored-dependency (Array.push-back! &dependencies [])
+             _ignored-reference (Array.push-back! &references (Maybe.Nothing))]
       (SessionOverlay.init
         (Rc.new (ExpandSnapshot.copy (PreparedExpansion.snapshot prepared)))
         (ResolveSnapshot.copy (SessionOverlay.resolution overlay))
@@ -616,7 +616,7 @@ traces retained once by `CompilerSession`.")
                (CoreModule.constructors (ProvenancedCoreModule.core resolved))
                0)
              type-name (String.copy "")
-             ignored-type-name (match-ref (Box.peek
+             _ignored-type-name (match-ref (Box.peek
                  (CoreConstructorDeclaration.result declaration))
                (CoreType.Named name _) (set! type-name (String.copy name))
                _ ())
@@ -627,10 +627,10 @@ traces retained once by `CompilerSession`.")
                                        (SourceSpan.init (String.copy (SourceInput.id input))
                                                         0
                                                         (String.length (SourceInput.source input))))
-             ignored-input (Array.push-back! &inputs (SourceInput.copy input))
-             ignored-definition (Array.push-back! &definitions info)
-             ignored-dependency (Array.push-back! &dependencies [])
-             ignored-reference (Array.push-back! &references (Maybe.Nothing))
+             _ignored-input (Array.push-back! &inputs (SourceInput.copy input))
+             _ignored-definition (Array.push-back! &definitions info)
+             _ignored-dependency (Array.push-back! &dependencies [])
+             _ignored-reference (Array.push-back! &references (Maybe.Nothing))
              resolution (Resolve.snapshot-with-module (SessionOverlay.resolution overlay)
                                                       core)]
       (SessionOverlay.init
@@ -685,11 +685,11 @@ traces retained once by `CompilerSession`.")
                                        (SourceSpan.init (String.copy (SourceInput.id input))
                                                         0
                                                         (String.length (SourceInput.source input))))
-             ignored-input (Array.push-back! &inputs (SourceInput.copy input))
-             ignored-definition (Array.push-back! &definitions info)
-             ignored-dependency (Array.push-back! &dependencies
-                                                  [(String.copy interface-name)
-                                                   (String.copy implementation-name)])]
+             _ignored-input (Array.push-back! &inputs (SourceInput.copy input))
+             _ignored-definition (Array.push-back! &definitions info)
+             _ignored-dependency (Array.push-back! &dependencies
+                                                   [(String.copy interface-name)
+                                                    (String.copy implementation-name)])]
       (Array.push-back! &references (Maybe.Nothing))
       (SessionOverlay.init
         (Rc.new (ExpandSnapshot.copy (PreparedExpansion.snapshot prepared)))
@@ -732,27 +732,27 @@ traces retained once by `CompilerSession`.")
                  definitions (Array.copy (SessionOverlay.definitions overlay))
                  dependencies (Array.copy (SessionOverlay.dependencies overlay))
                  stored-references (Array.copy (SessionOverlay.references overlay))
-                 ignored-input (Array.push-back! &inputs
-                                                 (SourceInput.copy input))
-                 ignored-definition (Array.push-back! &definitions
-                                                      (SessionDefInfo.copy (Array.unsafe-nth &found
-                                                                                             0)))
+                 _ignored-input (Array.push-back! &inputs
+                                                  (SourceInput.copy input))
+                 _ignored-definition (Array.push-back! &definitions
+                                                       (SessionDefInfo.copy (Array.unsafe-nth &found
+                                                                                              0)))
                  references (CoreIR.global-dependencies core
                                                         (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
                                                                                                           0)))
                  dependency-names (the (Array String) [])
-                 ignored-dependency-names (for [i 0 (Array.length &references)]
+                 _ignored-dependency-names (for [i 0 (Array.length &references)]
                    (Array.push-back! &dependency-names
                                      (String.copy
                                        (CoreRef.name (Array.unsafe-nth &references
                                                                        i)))))
-                 ignored-dependency (Array.push-back! &dependencies
-                                                      dependency-names)
-                 ignored-reference (Array.push-back! &stored-references
-                                                     (Maybe.Just
-                                                       (CoreRef.copy
-                                                         (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
-                                                                                                           0)))))
+                 _ignored-dependency (Array.push-back! &dependencies
+                                                       dependency-names)
+                 _ignored-reference (Array.push-back! &stored-references
+                                                      (Maybe.Just
+                                                        (CoreRef.copy
+                                                          (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
+                                                                                                            0)))))
                  resolution (Resolve.snapshot-with-module (SessionOverlay.resolution overlay)
                                                           core)]
           (Result.Success
@@ -1447,7 +1447,7 @@ reports its transitive resolved dependents.")
                 invalidated (if (Int.>= old-index 0)
                   (invalidated-by current old-index)
                   (the (Array String) []))
-                ignored-candidate (if (Int.>= old-index 0)
+                _ignored-candidate (if (Int.>= old-index 0)
                   (do
                     (Array.aset! &inputs old-index (SourceInput.copy input))
                     (unless (compatible-definition-kind?
@@ -1495,9 +1495,9 @@ reports its transitive resolved dependents.")
         (let-do [invalidated (invalidated-by current index)
                  inputs (the (Array SourceInput) [])
                  references (the (Array (Maybe CoreRef)) [])
-                 ignored-input-filter (for [i
-                                            0
-                                            (Array.length (SessionOverlay.inputs current))]
+                 _ignored-input-filter (for [i
+                                             0
+                                             (Array.length (SessionOverlay.inputs current))]
                    (let [candidate-name (SessionDefInfo.name
                            (Array.unsafe-nth (SessionOverlay.definitions current)
                                              i))]

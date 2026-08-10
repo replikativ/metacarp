@@ -114,10 +114,10 @@
         value (node-at &module 1)
         state (CtEval.state)
         frame (CtEval.root &state)
-        binding (CtEval.define! &state
-                                &frame
-                                "x"
-                                (CtValue.Syntax (Box.init value)))]
+        _binding (CtEval.define! &state
+                                 &frame
+                                 "x"
+                                 (CtValue.Syntax (Box.init value)))]
     (match (CtEval.eval-template &body &state &frame)
       (Result.Success result) (is-int? &result 9)
       (Result.Error _) false)))

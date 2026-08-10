@@ -659,7 +659,7 @@
               (Result.Success root-module)
                 (let-do [targets (collect-load-targets (SurfaceModule.forms &root-module))
                          seed (the (Array (Pair String String)) [])
-                         ignored-seed (for [i 0 (Array.length &targets)]
+                         _ignored-seed (for [i 0 (Array.length &targets)]
                            (Array.push-back! &seed
                                              (Pair.init (String.copy input)
                                                         @(Array.unsafe-nth &targets
@@ -681,7 +681,7 @@
                                           (ModuleError.message &e)))
                         (the (Maybe (Pair SurfaceModule String)) (Maybe.Nothing)))
                     (Result.Success loaded)
-                      (let-do [ignored-phase (phase! "loaded")
+                      (let-do [_ignored-phase (phase! "loaded")
                                module (ModuleLoader.with-compiler-prelude &loaded)]
                         (Maybe.Just (Pair.init module source))))))))))
 

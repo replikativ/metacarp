@@ -734,7 +734,7 @@ relies on C block scoping (nested statement expressions shadow it).")
       ;; a unit-typed scope has no value to capture: run it for its effects as
       ;; a void statement expression (`void _carp_sv;` would not compile).
       (let-do [buffer (StringBuf.create)
-               ignored-open (StringBuf.append-str &buffer "({ ")]
+               _ignored-open (StringBuf.append-str &buffer "({ ")]
         (match (append-statement! constructors &buffer expression 0)
           (Result.Success _)
             (do
@@ -744,10 +744,10 @@ relies on C block scoping (nested statement expressions shadow it).")
       (match (render-type &result-type)
         (Result.Success type-c)
           (let-do [buffer (StringBuf.create)
-                   ignored-open (StringBuf.append-str &buffer "({ ")
-                   ignored-type (StringBuf.append-str &buffer &type-c)
-                   ignored-space (StringBuf.append-char &buffer \space)
-                   ignored-name (StringBuf.append-str &buffer "_carp_sv; ")
+                   _ignored-open (StringBuf.append-str &buffer "({ ")
+                   _ignored-type (StringBuf.append-str &buffer &type-c)
+                   _ignored-space (StringBuf.append-char &buffer \space)
+                   _ignored-name (StringBuf.append-str &buffer "_carp_sv; ")
                    destination (ResultDestination.Assign (String.copy "_carp_sv")
                                                          (Box.init (MonoType.copy &result-type)))]
             (match (append-result! constructors
