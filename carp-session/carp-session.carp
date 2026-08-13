@@ -727,32 +727,29 @@ traces retained once by `CompilerSession`.")
                         inferred]
     (let [found (definitions-report input core inferred source-provenance)
           schemes (Infer.spanned-definition-schemes inferred source-provenance)]
-      (if (Int.= 1 (Array.length &found))
+      ;; one entry per definition the input contributes, all pointing at that
+      ;; input: a cell holds one, a file holds many, and both are provenance
+      ;; for the same bookkeeping
+      (if (Int.> (Array.length &found) 0)
         (let-do [inputs (Array.copy (SessionOverlay.inputs overlay))
                  definitions (Array.copy (SessionOverlay.definitions overlay))
                  dependencies (Array.copy (SessionOverlay.dependencies overlay))
                  stored-references (Array.copy (SessionOverlay.references overlay))
-                 _ignored-input (Array.push-back! &inputs
-                                                  (SourceInput.copy input))
-                 _ignored-definition (Array.push-back! &definitions
-                                                       (SessionDefInfo.copy (Array.unsafe-nth &found
-                                                                                              0)))
-                 references (CoreIR.global-dependencies core
-                                                        (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
-                                                                                                          0)))
-                 dependency-names (the (Array String) [])
-                 _ignored-dependency-names (for [i 0 (Array.length &references)]
-                   (Array.push-back! &dependency-names
-                                     (String.copy
-                                       (CoreRef.name (Array.unsafe-nth &references
-                                                                       i)))))
-                 _ignored-dependency (Array.push-back! &dependencies
-                                                       dependency-names)
-                 _ignored-reference (Array.push-back! &stored-references
-                                                      (Maybe.Just
-                                                        (CoreRef.copy
-                                                          (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
-                                                                                                            0)))))
+                 found-count (Array.length &found)
+                 _ignored-definitions (for [d 0 found-count]
+                   (let-do [reference (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes d))
+                            references (CoreIR.global-dependencies core reference)
+                            dependency-names (the (Array String) [])]
+                     (for [i 0 (Array.length &references)]
+                       (Array.push-back! &dependency-names
+                                         (String.copy
+                                           (CoreRef.name (Array.unsafe-nth &references i)))))
+                     (Array.push-back! &inputs (SourceInput.copy input))
+                     (Array.push-back! &definitions
+                                       (SessionDefInfo.copy (Array.unsafe-nth &found d)))
+                     (Array.push-back! &dependencies dependency-names)
+                     (Array.push-back! &stored-references
+                                       (Maybe.Just (CoreRef.copy reference)))))
                  resolution (Resolve.snapshot-with-module (SessionOverlay.resolution overlay)
                                                           core)]
           (Result.Success
@@ -914,15 +911,31 @@ traces retained once by `CompilerSession`.")
           Int
           (Ref SessionOverlay)]
          (Result SessionOverlay Diagnostic)))
+  ;; an input that contributed several definitions appears once per
+  ;; definition, so rebuilding extends it once and skips its repeats —
+  ;; extending it again would define everything in it twice
+  (private repeats-previous?)
+  (hidden repeats-previous?)
+  (sig repeats-previous? (Fn [(Ref (Array SourceInput)) Int] Bool))
+  (defn repeats-previous? [inputs index]
+    (if (Int.= index 0)
+      false
+      (let [current (Array.unsafe-nth inputs index)
+            previous (Array.unsafe-nth inputs (Int.dec index))]
+        (and (String.= (SourceInput.id current) (SourceInput.id previous))
+             (String.= (SourceInput.source current) (SourceInput.source previous))))))
+
   (defn rebuild-overlay-at [session inputs reuse index overlay]
     (if (Int.= index (Array.length inputs))
       (Result.Success (SessionOverlay.copy overlay))
-      (match (extend-overlay overlay
-                             (Array.unsafe-nth inputs index)
-                             @(Array.unsafe-nth reuse index))
-        (Result.Success next)
-          (rebuild-overlay-at session inputs reuse (Int.inc index) &next)
-        (Result.Error diagnostic) (Result.Error diagnostic))))
+      (if (repeats-previous? inputs index)
+        (rebuild-overlay-at session inputs reuse (Int.inc index) overlay)
+        (match (extend-overlay overlay
+                               (Array.unsafe-nth inputs index)
+                               @(Array.unsafe-nth reuse index))
+          (Result.Success next)
+            (rebuild-overlay-at session inputs reuse (Int.inc index) &next)
+          (Result.Error diagnostic) (Result.Error diagnostic)))))
 
   (private rebuild-overlay)
   (hidden rebuild-overlay)
@@ -1481,6 +1494,83 @@ reports its transitive resolved dependents.")
                                          invalidated)))
                 (Result.Error diagnostic)
                   (Result.Error (Diagnostic.copy diagnostic)))))
+        (Result.Error diagnostic) (Result.Error diagnostic))))
+
+  (private without-input)
+  (hidden without-input)
+  (doc without-input "the overlay's inputs and their reuse references with
+every entry belonging to an input id dropped.")
+  (sig without-input
+       (Fn
+         [(Ref SessionOverlay) (Ref String)]
+         (Pair (Array SourceInput) (Array (Maybe CoreRef)))))
+  (defn without-input [overlay id]
+    (let-do [inputs (the (Array SourceInput) [])
+             reuse (the (Array (Maybe CoreRef)) [])
+             old-inputs (SessionOverlay.inputs overlay)
+             old-reuse (SessionOverlay.references overlay)
+             n (Array.length old-inputs)]
+      (for [i 0 n]
+        (unless (String.= (SourceInput.id (Array.unsafe-nth old-inputs i)) id)
+          (do
+            (Array.push-back! &inputs (SourceInput.copy (Array.unsafe-nth old-inputs i)))
+            (Array.push-back! &reuse @(Array.unsafe-nth old-reuse i)))))
+      (Pair.init inputs reuse)))
+
+  (private definitions-of-input)
+  (hidden definitions-of-input)
+  (defn definitions-of-input [overlay id]
+    (let-do [result (the (Array SessionDefInfo) [])
+             definitions (SessionOverlay.definitions overlay)
+             n (Array.length definitions)]
+      (for [i 0 n]
+        (let [definition (Array.unsafe-nth definitions i)]
+          (when (String.= (SourceInput.id (SessionDefInfo.source definition)) id)
+            (Array.push-back! &result (SessionDefInfo.copy definition)))))
+      result))
+
+  (doc upsert-input "upserts a whole input — a file, say — with however many
+definitions it holds, and answers them. Everything that input contributed
+before is replaced: definitions that have vanished from it are dropped, so a
+rename leaves no ghost behind. Use `upsert` for a single definition whose
+identity is its name rather than its file.")
+  (sig upsert-input
+       (Fn
+         [(Ref CompilerSession) (Ref SourceInput)]
+         (Result (Array SessionDefInfo) Diagnostic)))
+  (defn upsert-input [session input]
+    (let [current (Array.unsafe-nth (CompilerSession.overlay session) 0)
+          kept (without-input current (SourceInput.id input))
+          next-id @(Array.unsafe-nth
+                     (IdAllocator.cell (SessionOverlay.node-allocator current))
+                     0)]
+      (let-do [inputs (Array.copy (Pair.a &kept))
+               reuse (Array.copy (Pair.b &kept))]
+        (Array.push-back! &inputs (SourceInput.copy input))
+        (Array.push-back! &reuse (the (Maybe CoreRef) (Maybe.Nothing)))
+        (match (rebuild-overlay session &inputs &reuse next-id)
+          (Result.Success rebuilt)
+            (let [committed (definitions-of-input &rebuilt (SourceInput.id input))]
+              (do
+                (Array.aset! (CompilerSession.overlay session) 0 rebuilt)
+                (Result.Success committed)))
+          (Result.Error diagnostic) (Result.Error diagnostic)))))
+
+  (doc remove-input "drops everything an input contributed, as deleting the
+file would.")
+  (sig remove-input
+       (Fn [(Ref CompilerSession) (Ref String)] (Result () Diagnostic)))
+  (defn remove-input [session id]
+    (let [current (Array.unsafe-nth (CompilerSession.overlay session) 0)
+          kept (without-input current id)
+          next-id @(Array.unsafe-nth
+                     (IdAllocator.cell (SessionOverlay.node-allocator current))
+                     0)]
+      (match (rebuild-overlay session (Pair.a &kept) (Pair.b &kept) next-id)
+        (Result.Success rebuilt)
+          (do
+            (Array.aset! (CompilerSession.overlay session) 0 rebuilt)
+            (Result.Success ()))
         (Result.Error diagnostic) (Result.Error diagnostic))))
 
   (doc remove "removes a definition and its transitive resolved dependents.")

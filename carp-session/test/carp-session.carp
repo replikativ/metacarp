@@ -443,6 +443,69 @@
           (Result.Error diagnostic) (diagnostic-false &diagnostic)))
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
+(defn definition-named? [definitions name]
+  (let-do [found false]
+    (for [i 0 (Array.length definitions)]
+      (when (String.= (SessionDefInfo.name (Array.unsafe-nth definitions i)) name)
+        (set! found true)))
+    found))
+
+(defn definition-source-id [definitions name]
+  (let-do [id @""]
+    (for [i 0 (Array.length definitions)]
+      (let [definition (Array.unsafe-nth definitions i)]
+        (when (String.= (SessionDefInfo.name definition) name)
+          (set! id @(SourceInput.id (SessionDefInfo.source definition))))))
+    id))
+
+(defn multi-definition-inputs-reconcile-by-id? []
+  (match (make-session)
+    (Result.Success session)
+      (let-do [ok true
+               file (SourceInput.init (String.copy "module.carp")
+                                      (String.copy "(defn alpha [x] (warm-id x))
+(defn beta [x] (alpha x))
+(defn gamma [x] (beta x))"))]
+        ;; one input, every definition it holds, each with its own provenance
+        (match (Session.upsert-input &session &file)
+          (Result.Success committed)
+            (do
+              (unless (Int.= 3 (Array.length &committed)) (set! ok false))
+              (unless (and (definition-named? &committed "alpha")
+                           (and (definition-named? &committed "beta")
+                                (definition-named? &committed "gamma")))
+                (set! ok false))
+              (unless (String.= &(definition-source-id &committed "beta") "module.carp")
+                (set! ok false))
+              ;; distinct spans: each definition points at its own text
+              (unless (Int./= @(SourceSpan.start (SessionDefInfo.span (Array.unsafe-nth &committed 0)))
+                              @(SourceSpan.start (SessionDefInfo.span (Array.unsafe-nth &committed 1))))
+                (set! ok false)))
+          (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
+        ;; re-upserting the same id replaces what that input contributed, so a
+        ;; renamed definition leaves no ghost behind
+        (let [renamed (SourceInput.init (String.copy "module.carp")
+                                        (String.copy "(defn alpha [x] (warm-id x))
+(defn delta [x] (alpha x))"))]
+          (match (Session.upsert-input &session &renamed)
+            (Result.Success committed)
+              (do
+                (unless (Int.= 2 (Array.length &committed)) (set! ok false))
+                (let [definitions (Session.definitions &session)]
+                  (when (definition-named? &definitions "beta") (set! ok false))
+                  (when (definition-named? &definitions "gamma") (set! ok false))
+                  (unless (definition-named? &definitions "delta") (set! ok false))))
+            (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic))))
+        ;; and removing the input drops everything it contributed
+        (match (Session.remove-input &session "module.carp")
+          (Result.Success _)
+            (let [definitions (Session.definitions &session)]
+              (when (definition-named? &definitions "alpha") (set! ok false))
+              (when (definition-named? &definitions "delta") (set! ok false)))
+          (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
+        ok)
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn committed-overlay-lifecycle-is-transactional? []
   (match (make-session)
     (Result.Success session)
@@ -890,4 +953,7 @@
     "committed types expose derived bindings and invalidate consumers")
   (assert-true t
     (committed-interfaces-retain-dispatch?)
-    "committed interfaces and implementations retain dispatch state"))
+    "committed interfaces and implementations retain dispatch state")
+  (assert-true t
+    (multi-definition-inputs-reconcile-by-id?)
+    "a whole input commits every definition it holds and reconciles by id"))
