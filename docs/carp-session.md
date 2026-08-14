@@ -139,6 +139,7 @@ clients; its internal compiler representations are not API.
   -> (Array Candidate)
 (Session.doc (Ref Session) String) -> (Maybe DocInfo)
 
+(Session.prepare-emit (Ref Session)) -> ()
 (Session.emit-cell (Ref Session) SourceInput)
   -> (Result String Diagnostic)
 (Session.build-cell (Ref Session) SourceInput String)
@@ -302,7 +303,16 @@ the library returns deterministic candidates matching the supplied prefix.
 ## Code generation and build caching
 
 `emit-cell` compiles a transient cell program against the committed session and
-returns a C translation unit. It must not mutate the session.
+returns a C translation unit. It must not mutate the session — beyond the
+memoized base analysis described below, which no caller can observe.
+
+Emitting needs every inference trace in the session normalized with the
+substitution that produced it. The base half of that work is proportional to
+the size of the loaded program and is invariant, since the base is fixed when
+the session is created: it is done once and kept, and each emission normalizes
+only the overlay. On a compiler-sized project this is the difference between
+thirty seconds and two hundred milliseconds per cell. `prepare-emit` does the
+base half up front for callers that would rather pay it while loading.
 
 `build-cell` is a later milestone. It splits reusable core output from
 cell-specific output, compiles core object code once per compatible cache key,

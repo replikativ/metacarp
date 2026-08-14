@@ -83,7 +83,10 @@ environment.")
    base-inferred InferredModule
    base-interfaces (Rc (Array CoreInterface))
    base-implementations (Rc (Array CoreImplementation))
-   overlay (Array SessionOverlay)])
+   overlay (Array SessionOverlay)
+   ;; a one-slot cache of the normalized base inference traces, filled on first
+   ;; use; the base cannot change, so it never goes stale
+   analysis (Array InferredModule)])
 
 (defmodule Session
   (doc api-version "is the stable carp-session API revision.")
@@ -91,79 +94,29 @@ environment.")
 
   (private append-inferred-analysis)
   (hidden append-inferred-analysis)
-  (doc append-inferred-analysis "retains normalized inference traces for
-committed user definitions while extending the compact warm environment.")
-  (defn append-inferred-analysis [base overlay]
-    (let-do [environment (Array.copy (InferredModule.environment base))
+  (private normalized-analysis)
+  (hidden normalized-analysis)
+  (doc normalized-analysis "one module's inference traces, each normalized with
+the substitution of the run that produced it. A merged module carries an empty
+substitution, so normalization has to happen before modules are combined: a
+trace that kept its solver variables fails specialization later, when a
+committed definition makes a dormant polymorphic call reachable.")
+  (defn normalized-analysis [module]
+    (let-do [environment (Array.copy (InferredModule.environment module))
              expression-types (the (Array (Box MonoType)) [])
              calls (the (Array CallSite) [])
              node-types (the (Array InferredNodeType) [])
              binding-types (the (Array InferredBindingType) [])
-             base-substitution (InferredModule.substitution base)
-             substitution (InferredModule.substitution overlay)]
-      ;; Every trace must be normalized with the substitution belonging to the
-      ;; inference run that produced it before the merged module switches to an
-      ;; empty substitution. Previously only the overlay half was normalized;
-      ;; dormant polymorphic Core calls therefore retained solver variables and
-      ;; failed specialization when a committed definition made them reachable.
-      (for [i 0 (Array.length (InferredModule.expression-types base))]
-        (Array.push-back! &expression-types
-                          (Box.init
-                            (Type.apply base-substitution
-                                        (Box.peek
-                                          (Array.unsafe-nth (InferredModule.expression-types base)
-                                                            i))))))
-      (for [i 0 (Array.length (InferredModule.calls base))]
-        (let [call (Array.unsafe-nth (InferredModule.calls base) i)]
-          (Array.push-back! &calls
-                            (CallSite.init @(CallSite.id call)
-                                           (CoreRef.copy (CallSite.reference call))
-                                           (Box.init
-                                             (Type.apply base-substitution
-                                                         (Box.peek (CallSite.type call))))
-                                           (match-ref (CallSite.owner call)
-                                             (Maybe.Just owner)
-                                               (Maybe.Just (CoreRef.copy owner))
-                                             (Maybe.Nothing) (Maybe.Nothing))))))
-      (for [i 0 (Array.length (InferredModule.node-types base))]
-        (let [node (Array.unsafe-nth (InferredModule.node-types base) i)]
-          (Array.push-back! &node-types
-                            (InferredNodeType.init @(InferredNodeType.id node)
-                                                   (match-ref (InferredNodeType.owner node)
-                                                     (Maybe.Just owner)
-                                                       (Maybe.Just (CoreRef.copy owner))
-                                                     (Maybe.Nothing)
-                                                       (Maybe.Nothing))
-                                                   (Box.init
-                                                     (Type.apply base-substitution
-                                                                 (Box.peek (InferredNodeType.type node))))))))
-      (for [i 0 (Array.length (InferredModule.binding-types base))]
-        (let [binding (Array.unsafe-nth (InferredModule.binding-types base) i)]
-          (Array.push-back! &binding-types
-                            (InferredBindingType.init
-                              (CoreRef.copy (InferredBindingType.reference binding))
-                              (match-ref (InferredBindingType.owner binding)
-                                (Maybe.Just owner)
-                                  (Maybe.Just (CoreRef.copy owner))
-                                (Maybe.Nothing) (Maybe.Nothing))
-                              (Box.init
-                                (Type.apply base-substitution
-                                            (Box.peek (InferredBindingType.type binding))))))))
-      (for [i 0 (Array.length (InferredModule.environment overlay))]
-        (Array.push-back! &environment
-                          (SchemeBinding.copy
-                            (Array.unsafe-nth (InferredModule.environment overlay)
-                                              i))))
-      (for [i 0 (Array.length (InferredModule.expression-types overlay))]
+             substitution (InferredModule.substitution module)]
+      (for [i 0 (Array.length (InferredModule.expression-types module))]
         (Array.push-back! &expression-types
                           (Box.init
                             (Type.apply substitution
                                         (Box.peek
-                                          (Array.unsafe-nth
-                                            (InferredModule.expression-types overlay)
-                                            i))))))
-      (for [i 0 (Array.length (InferredModule.calls overlay))]
-        (let [call (Array.unsafe-nth (InferredModule.calls overlay) i)]
+                                          (Array.unsafe-nth (InferredModule.expression-types module)
+                                                            i))))))
+      (for [i 0 (Array.length (InferredModule.calls module))]
+        (let [call (Array.unsafe-nth (InferredModule.calls module) i)]
           (Array.push-back! &calls
                             (CallSite.init @(CallSite.id call)
                                            (CoreRef.copy (CallSite.reference call))
@@ -174,8 +127,8 @@ committed user definitions while extending the compact warm environment.")
                                              (Maybe.Just owner)
                                                (Maybe.Just (CoreRef.copy owner))
                                              (Maybe.Nothing) (Maybe.Nothing))))))
-      (for [i 0 (Array.length (InferredModule.node-types overlay))]
-        (let [node (Array.unsafe-nth (InferredModule.node-types overlay) i)]
+      (for [i 0 (Array.length (InferredModule.node-types module))]
+        (let [node (Array.unsafe-nth (InferredModule.node-types module) i)]
           (Array.push-back! &node-types
                             (InferredNodeType.init @(InferredNodeType.id node)
                                                    (match-ref (InferredNodeType.owner node)
@@ -186,8 +139,8 @@ committed user definitions while extending the compact warm environment.")
                                                    (Box.init
                                                      (Type.apply substitution
                                                                  (Box.peek (InferredNodeType.type node))))))))
-      (for [i 0 (Array.length (InferredModule.binding-types overlay))]
-        (let [binding (Array.unsafe-nth (InferredModule.binding-types overlay) i)]
+      (for [i 0 (Array.length (InferredModule.binding-types module))]
+        (let [binding (Array.unsafe-nth (InferredModule.binding-types module) i)]
           (Array.push-back! &binding-types
                             (InferredBindingType.init
                               (CoreRef.copy (InferredBindingType.reference binding))
@@ -204,6 +157,46 @@ committed user definitions while extending the compact warm environment.")
                            node-types
                            binding-types
                            (Type.empty-substitution))))
+
+  (private concat-analysis)
+  (hidden concat-analysis)
+  (doc concat-analysis "two already-normalized trace sets as one.")
+  (defn concat-analysis [base overlay]
+    (let-do [environment (Array.copy (InferredModule.environment base))
+             expression-types (Array.copy (InferredModule.expression-types base))
+             calls (Array.copy (InferredModule.calls base))
+             node-types (Array.copy (InferredModule.node-types base))
+             binding-types (Array.copy (InferredModule.binding-types base))]
+      (for [i 0 (Array.length (InferredModule.environment overlay))]
+        (Array.push-back! &environment
+                          (SchemeBinding.copy
+                            (Array.unsafe-nth (InferredModule.environment overlay) i))))
+      (for [i 0 (Array.length (InferredModule.expression-types overlay))]
+        (Array.push-back! &expression-types
+                          (Box.copy
+                            (Array.unsafe-nth (InferredModule.expression-types overlay) i))))
+      (for [i 0 (Array.length (InferredModule.calls overlay))]
+        (Array.push-back! &calls
+                          (CallSite.copy (Array.unsafe-nth (InferredModule.calls overlay) i))))
+      (for [i 0 (Array.length (InferredModule.node-types overlay))]
+        (Array.push-back! &node-types
+                          (InferredNodeType.copy
+                            (Array.unsafe-nth (InferredModule.node-types overlay) i))))
+      (for [i 0 (Array.length (InferredModule.binding-types overlay))]
+        (Array.push-back! &binding-types
+                          (InferredBindingType.copy
+                            (Array.unsafe-nth (InferredModule.binding-types overlay) i))))
+      (InferredModule.init environment
+                           expression-types
+                           calls
+                           node-types
+                           binding-types
+                           (Type.empty-substitution))))
+
+  (doc append-inferred-analysis "retains normalized inference traces for
+committed user definitions while extending the compact warm environment.")
+  (defn append-inferred-analysis [base overlay]
+    (concat-analysis &(normalized-analysis base) &(normalized-analysis overlay)))
 
   (private inferred-environment-with-analysis)
   (hidden inferred-environment-with-analysis)
@@ -1088,7 +1081,8 @@ the expensive expansion, resolution, and inference happen exactly once here.")
                                                     inferred
                                                     base-interfaces
                                                     base-implementations
-                                                    [current])))
+                                                    [current]
+                                                    [])))
                         (Result.Error diagnostic) (Result.Error diagnostic)))
                   (Result.Error error)
                     (Result.Error
@@ -1117,6 +1111,29 @@ library under `core-dir` once, producing a warm compiler session.")
           (create-from-module &sourced &config))
       (Result.Error diagnostic) (Result.Error diagnostic)))
 
+  (private set-overlay!)
+  (hidden set-overlay!)
+  (doc set-overlay! "replaces the session's overlay — the one place it changes,
+so anything later derived from it has a single place to be invalidated from.")
+  (defn set-overlay! [session next]
+    (Array.aset! (CompilerSession.overlay session) 0 next))
+
+  (private session-analysis)
+  (hidden session-analysis)
+  (doc session-analysis "the base and overlay inference traces as one set.
+Normalizing the base half means walking every trace the base holds and
+applying its substitution: on a project the size of a compiler that is half a
+minute of work, and the base is fixed when the session is created — so it is
+normalized once and kept, and each call only normalizes the overlay, which
+holds what the user has committed since.")
+  (defn session-analysis [session overlay]
+    (do
+      (when (Int.= (Array.length (CompilerSession.analysis session)) 0)
+        (Array.push-back! (CompilerSession.analysis session)
+                          (normalized-analysis (CompilerSession.base-inferred session))))
+      (concat-analysis (Array.unsafe-nth (CompilerSession.analysis session) 0)
+                       &(normalized-analysis (SessionOverlay.inferred overlay)))))
+
   (doc reset "drops committed user definitions while retaining the warm core.")
   (defn reset [session]
     (let-do [old (Array.unsafe-nth (CompilerSession.overlay session) 0)
@@ -1136,7 +1153,7 @@ library under `core-dir` once, producing a warm compiler session.")
                []
                []
                [])]
-      (Array.aset! (CompilerSession.overlay session) 0 fresh)))
+      (set-overlay! session fresh)))
 
   (doc definitions "returns committed user definitions in dependency order.")
   (defn definitions [session]
@@ -1486,9 +1503,7 @@ reports its transitive resolved dependents.")
                                                          old-index
                                                          (Int.dec
                                                            (Array.length (SessionOverlay.definitions rebuilt)))))]
-                    (Array.aset! (CompilerSession.overlay session)
-                                 0
-                                 (SessionOverlay.copy rebuilt))
+                    (set-overlay! session (SessionOverlay.copy rebuilt))
                     (Result.Success
                       (UpsertReport.init (SessionDefInfo.copy committed)
                                          invalidated)))
@@ -1552,7 +1567,7 @@ identity is its name rather than its file.")
           (Result.Success rebuilt)
             (let [committed (definitions-of-input &rebuilt (SourceInput.id input))]
               (do
-                (Array.aset! (CompilerSession.overlay session) 0 rebuilt)
+                (set-overlay! session rebuilt)
                 (Result.Success committed)))
           (Result.Error diagnostic) (Result.Error diagnostic)))))
 
@@ -1569,7 +1584,7 @@ file would.")
       (match (rebuild-overlay session (Pair.a &kept) (Pair.b &kept) next-id)
         (Result.Success rebuilt)
           (do
-            (Array.aset! (CompilerSession.overlay session) 0 rebuilt)
+            (set-overlay! session rebuilt)
             (Result.Success ()))
         (Result.Error diagnostic) (Result.Error diagnostic))))
 
@@ -1610,9 +1625,7 @@ file would.")
             (match-ref &rebuilt-result
               (Result.Success rebuilt)
                 (do
-                  (Array.aset! (CompilerSession.overlay session)
-                               0
-                               (SessionOverlay.copy rebuilt))
+                  (set-overlay! session (SessionOverlay.copy rebuilt))
                   (Result.Success
                     (RemoveReport.init (String.copy name) invalidated)))
               (Result.Error diagnostic)
@@ -1673,6 +1686,29 @@ top-level form. Returns `Nothing` when no top-level form is a macro call.")
 transient cell against the warm committed environment. Expansion, identity
 allocation, inference, and code generation occur on private copies and cannot
 mutate the session.")
+  (private emit-mark!)
+  (hidden emit-mark!)
+  ;; Prints elapsed milliseconds per emit-cell step under CARP_DEBUG_EMIT, the
+  ;; way the compiler's own pipeline reports phases under CARP_DEBUG_PHASES.
+  ;; Emission cost is dominated by whole-program work, so it is worth being
+  ;; able to see which step a session is spending its time in.
+  (defn emit-mark! [name since]
+    (match (IO.getenv "CARP_DEBUG_EMIT")
+      (Maybe.Just _)
+        (IO.errorln &(fmt "emit %s: %.0f ms"
+                          name
+                          (Double./ (Double.from-long (Uint64.to-long (Uint64.- (System.nanotime) since)))
+                                    1000000.0)))
+      (Maybe.Nothing) ()))
+
+  (doc prepare-emit "does the session-wide work that emitting a cell needs —
+normalizing the base's inference traces — so the first cell does not pay for
+it. Optional: emit-cell does it on demand.")
+  (defn prepare-emit [session]
+    (when (Int.= (Array.length (CompilerSession.analysis session)) 0)
+      (Array.push-back! (CompilerSession.analysis session)
+                        (normalized-analysis (CompilerSession.base-inferred session)))))
+
   (defn emit-cell [session input]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]
       (match (Surface.parse-input-diagnosed input)
@@ -1680,9 +1716,12 @@ mutate the session.")
           (match (MacroExpand.expand-module-against (SourcedSurfaceModule.module &parsed)
                                                     (Rc.value-ref (SessionOverlay.expansion overlay)))
             (Result.Success expanded)
-              (let-do [sourced (SourcedSurfaceModule.init (SourceInput.copy input)
+              (let-do [started (System.nanotime)
+                       _m0 (emit-mark! "expanded" started)
+                       sourced (SourcedSurfaceModule.init (SourceInput.copy input)
                                                           expanded)
-                       allocator (IdAllocator.copy (SessionOverlay.node-allocator overlay))]
+                       allocator (IdAllocator.copy (SessionOverlay.node-allocator overlay))
+                       _m1 (emit-mark! "allocator-copied" started)]
                 (match (Resolve.module-with-provenance-against &sourced
                                                                &allocator
                                                                (SessionOverlay.resolution overlay))
@@ -1700,19 +1739,21 @@ mutate the session.")
                                                                  (ProvenancedCoreModule.provenance &derived)
                                                                  (SessionOverlay.inferred overlay))
                             (Result.Success inferred)
-                              (let-do [core (CoreIR.append-modules (CompilerSession.base-core session)
+                              (let-do [_m2 (emit-mark! "inferred" started)
+                                       core (CoreIR.append-modules (CompilerSession.base-core session)
                                                                    (SessionOverlay.core overlay))
                                        complete-core (CoreIR.append-modules &core
                                                                             (ProvenancedCoreModule.core &derived))
-                                       base-and-overlay-analysis (append-inferred-analysis (CompilerSession.base-inferred session)
-                                                                                           (SessionOverlay.inferred overlay))
+                                       _m3 (emit-mark! "core-appended" started)
                                        warm-inferred (inferred-environment-with-analysis (SessionOverlay.inferred overlay)
-                                                                                         &base-and-overlay-analysis)
+                                                                                         &(session-analysis session overlay))
                                        complete-inferred (append-inferred-analysis &warm-inferred
-                                                                                   &inferred)]
+                                                                                   &inferred)
+                                       _m4 (emit-mark! "analysis-appended" started)]
                                 (match (CarpCompiler.compile-inferred-module &complete-core
                                                                              &complete-inferred)
-                                  (Result.Success c) (Result.Success c)
+                                  (Result.Success c)
+                                    (do (emit-mark! "compiled" started) (Result.Success c))
                                   (Result.Error error)
                                     (Result.Error (compile-diagnostic &error
                                                                       input))))
