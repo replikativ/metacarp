@@ -527,14 +527,18 @@
     equal))
 
 ; resolves one plain load target against the requesting file's directory, then
-; core-dir; git references go to the cache. The Pair is (canonical file, text).
+; core-dir; git references go to the cache. A target that names an absolute
+; path IS the path — joining it onto the requester's directory could only ever
+; produce a file that does not exist. The Pair is (canonical file, text).
 (defn resolve-load-target [core-dir requester-file name]
   (if (git-ref? name)
     (read-git-source name)
     (let [requester-dir (dir-of requester-file)
-          local (normalize-path
-            &(String.concat
-              &[(String.copy &requester-dir) @"/" (String.copy name)]))]
+          local (if (String.starts-with? name "/")
+                  (normalize-path name)
+                  (normalize-path
+                    &(String.concat
+                      &[(String.copy &requester-dir) @"/" (String.copy name)])))]
       (match (if (same-path-ignoring-case? &local
                                            &(normalize-path requester-file))
           (Result.Error @"self")
