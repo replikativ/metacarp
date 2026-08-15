@@ -357,7 +357,18 @@ compile-time snapshot produced while expanding it.")
       (if (or (Int.< argument-count fixed-count)
               (and (Maybe.nothing? &rest) (/= fixed-count argument-count)))
         (Result.Error
-          (error-at call @"macro called with the wrong number of arguments"))
+          (error-at call
+                    (String.concat
+                      &[@"the macro "
+                        @(ExpandMacro.name macro)
+                        @" takes "
+                        (if (Maybe.just? &rest)
+                          (String.concat &[@"at least " (Int.str fixed-count)])
+                          (Int.str fixed-count))
+                        (if (Int.= fixed-count 1)
+                          @" argument, got "
+                          @" arguments, got ")
+                        (Int.str argument-count)])))
         (let-do [frame (CtEval.child! state (ExpandMacro.defining-frame macro))
                  n fixed-count]
           (for [i 0 n]

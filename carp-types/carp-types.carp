@@ -437,6 +437,23 @@ substitution. It is primarily used to instantiate a type scheme.")
         (String.concat &[@"(Ref " (type-kind (Box.peek inner)) @")"])
       (MonoType.Function _ result)
         (String.concat &[@"(Fn -> " (type-kind (Box.peek result)) @")"])))
+  (private argument-count)
+  (hidden argument-count)
+  (doc argument-count "a count of arguments, written the way a sentence
+wants it: one argument, two arguments.")
+  (defn argument-count [n]
+    (if (Int.= n 1) @"1 argument" (String.concat &[(Int.str n) @" arguments"])))
+
+  (private arity-mismatch)
+  (hidden arity-mismatch)
+  (doc arity-mismatch "the error two argument lists of different lengths
+answer. The counts are the whole of what went wrong, so they are what the
+message says.")
+  (defn arity-mismatch [expected got]
+    (TypeError.init
+      (String.concat
+        &[@"expected " (argument-count expected) @", got " (Int.str got)])))
+
   (sig unify-arguments-owned
        (Fn
          [(Ref (Array (Box MonoType)))
@@ -445,7 +462,9 @@ substitution. It is primarily used to instantiate a type scheme.")
          (Result TypeSubstitution TypeError)))
   (defn unify-arguments-owned [left-arguments right-arguments substitution]
     (if (/= (Array.length left-arguments) (Array.length right-arguments))
-      (Result.Error (TypeError.init @"type constructor arity mismatch"))
+      (Result.Error
+        (arity-mismatch (Array.length left-arguments)
+                        (Array.length right-arguments)))
       (unify-arguments-at left-arguments right-arguments 0 substitution)))
 
   (sig unify-arguments-at
@@ -510,6 +529,128 @@ substitution. It is primarily used to instantiate a type scheme.")
               (Maybe.Nothing) (bind-owned @variable left substitution))
           _ (unify-concrete-owned left right substitution))))
 
+  ;; the variables of the type being rendered, in the order they first
+  ;; appear. A render names them from this list, so the same variable reads
+  ;; the same way everywhere in one type and no two variables share a name.
+  (def *render-names* (the (Array Int) []))
+
+  ;; the name the source gave each of those variables, when a scheme was
+  ;; rendered and knew them. Empty means the reader gets a letter.
+  (def *render-labels* (the (Array String) []))
+
+  (private variable-label)
+  (hidden variable-label)
+  (doc variable-label "the name a variable is rendered under: `a` for the
+first distinct one, `b` for the second, and after `z` a letter with a number
+after it. A variable the naming pass never saw keeps its identity rather than
+borrowing a name, which is what makes a stray one obvious.")
+  (defn variable-label [names variable]
+    (let-do [found -1
+             n (Array.length names)]
+      (for [i 0 n]
+        (when (Int.= @(Array.unsafe-nth names i) variable)
+          (when (Int.< found 0) (set! found i))))
+      (if (Int.< found 0)
+        (String.append "v" &(Int.str variable))
+        (let [given (if (Int.< found (Array.length &*render-labels*))
+                @(Array.unsafe-nth &*render-labels* found)
+                @"")]
+          (if (String.empty? &given)
+            (let [letter (String.from-chars
+                    &[(Char.from-int (Int.+ 97 (Int.mod found 26)))])
+                  cycle (Int./ found 26)]
+              (if (Int.= 0 cycle)
+                letter
+                (String.append &letter &(Int.str cycle))))
+            given)))))
+
+  (private collect-variables!)
+  (hidden collect-variables!)
+  (defn collect-variables! [type names]
+    (match-ref type
+      (MonoType.Variable variable)
+        (let-do [seen false
+                 n (Array.length names)]
+          (for [i 0 n]
+            (when (Int.= @(Array.unsafe-nth names i) @variable) (set! seen true)))
+          (unless seen (Array.push-back! names @variable)))
+      (MonoType.Named _ arguments)
+        (for [i 0 (Array.length arguments)]
+          (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
+      (MonoType.Reference inner _) (collect-variables! (Box.peek inner) names)
+      (MonoType.Function arguments result)
+        (do
+          (for [i 0 (Array.length arguments)]
+            (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
+          (collect-variables! (Box.peek result) names))
+      _ ()))
+
+  (private name-variables!)
+  (hidden name-variables!)
+  (defn name-variables! [type]
+    (let-do [names (the (Array Int) [])]
+      (collect-variables! type &names)
+      (set! *render-names* names)
+      (set! *render-labels* (the (Array String) []))))
+
+  (private render-arguments)
+  (hidden render-arguments)
+  (private render-internal)
+  (hidden render-internal)
+  (defn render-arguments [arguments]
+    (let-do [parts (the (Array String) [])
+             n (Array.length arguments)]
+      (for [i 0 n]
+        (Array.push-back! &parts
+                          (render-internal
+                            (Box.peek (Array.unsafe-nth arguments i)))))
+      (String.join " " &parts)))
+
+  (defn render-internal [type]
+    (match-ref type
+      (MonoType.Variable variable) (variable-label &*render-names* @variable)
+      (MonoType.Integer) @"Int"
+      (MonoType.String) @"String"
+      (MonoType.Boolean) @"Bool"
+      (MonoType.Unit) @"Unit"
+      (MonoType.Named type-name arguments)
+        (if (Int.= 0 (Array.length arguments))
+          (String.copy type-name)
+          (String.concat
+            &[@"("
+              (String.copy type-name)
+              @" "
+              (render-arguments arguments)
+              @")"]))
+      (MonoType.Reference inner _)
+        (String.concat &[@"(Ref " (render-internal (Box.peek inner)) @")"])
+      (MonoType.Function arguments result)
+        (String.concat
+          &[@"(Fn ["
+            (render-arguments arguments)
+            @"] "
+            (render-internal (Box.peek result))
+            @")"])))
+
+  (private mismatch)
+  (hidden mismatch)
+  (doc mismatch "the error a failed unification answers: both types, named
+together so a variable that appears in each reads as the same variable. What
+went wrong is that these two do not fit, and a reader cannot see that from
+one of them.")
+  (defn mismatch [left right]
+    (let-do [names (the (Array Int) [])]
+      (collect-variables! left &names)
+      (collect-variables! right &names)
+      (set! *render-names* names)
+      (set! *render-labels* (the (Array String) []))
+      (TypeError.init
+        (String.concat
+          &[@"cannot unify "
+            (render-internal left)
+            @" with "
+            (render-internal right)]))))
+
   (sig unify-concrete-owned
        (Fn
          [(Ref MonoType) (Ref MonoType) TypeSubstitution]
@@ -519,23 +660,19 @@ substitution. It is primarily used to instantiate a type scheme.")
       (MonoType.Integer)
         (match-ref right
           (MonoType.Integer) (Result.Success substitution)
-          _ (Result.Error (TypeError.init @"cannot unify Int with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.String)
         (match-ref right
           (MonoType.String) (Result.Success substitution)
-          _
-            (Result.Error (TypeError.init @"cannot unify String with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Boolean)
         (match-ref right
           (MonoType.Boolean) (Result.Success substitution)
-          _
-            (Result.Error
-              (TypeError.init
-                (String.concat &[@"cannot unify Bool with " (type-kind right)]))))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Unit)
         (match-ref right
           (MonoType.Unit) (Result.Success substitution)
-          _ (Result.Error (TypeError.init @"cannot unify unit with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Named left-name left-arguments)
         (match-ref right
           (MonoType.Named right-name right-arguments)
@@ -569,21 +706,9 @@ substitution. It is primarily used to instantiate a type scheme.")
                                        (bind-constructor-owned substitution
                                                                &r
                                                                &l))
-              (Result.Error
-                (TypeError.init
-                  (String.concat
-                    &[@"cannot unify "
-                      (String.copy &l)
-                      @" with "
-                      (String.copy &r)])))))
+              (Result.Error (mismatch left right))))
           _
-          (Result.Error
-            (TypeError.init
-              (String.concat
-                &[@"cannot unify "
-                  (String.copy left-name)
-                  @" with "
-                  (type-kind right)]))))
+          (Result.Error (mismatch left right)))
       (MonoType.Reference left-inner left-lifetime)
         (match-ref right
           (MonoType.Reference right-inner right-lifetime)
@@ -595,11 +720,7 @@ substitution. It is primarily used to instantiate a type scheme.")
                                        right-lifetime
                                        inner-substitution)
               (Result.Error error) (Result.Error error))
-          _
-            (Result.Error
-              (TypeError.init
-                (String.concat
-                  &[@"cannot unify reference with " (type-kind right)]))))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Function left-arguments left-result)
         (match-ref right
           (MonoType.Function right-arguments right-result)
@@ -608,9 +729,7 @@ substitution. It is primarily used to instantiate a type scheme.")
                                    right-arguments
                                    (Box.peek right-result)
                                    substitution)
-          _
-            (Result.Error
-              (TypeError.init @"cannot unify a function with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Variable _)
         (Result.Error
           (TypeError.init @"internal error: unresolved left type variable"))))
@@ -885,7 +1004,9 @@ normalization can then look up inference variables in constant time.")
   (hidden solver-unify-arguments!)
   (defn solver-unify-arguments! [solver left-arguments right-arguments]
     (if (/= (Array.length left-arguments) (Array.length right-arguments))
-      (Result.Error (TypeError.init @"type constructor arity mismatch"))
+      (Result.Error
+        (arity-mismatch (Array.length left-arguments)
+                        (Array.length right-arguments)))
       (let-do [result (the (Result Unit TypeError) (Result.Success ()))
                n (Array.length left-arguments)]
         (for [i 0 n]
@@ -942,25 +1063,19 @@ normalization can then look up inference variables in constant time.")
       (MonoType.Integer)
         (match-ref right
           (MonoType.Integer) (Result.Success ())
-          _ (Result.Error (TypeError.init @"cannot unify Int with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.String)
         (match-ref right
           (MonoType.String) (Result.Success ())
-          _
-            (Result.Error
-              (TypeError.init
-                (String.concat &[@"cannot unify String with " (type-kind right)]))))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Boolean)
         (match-ref right
           (MonoType.Boolean) (Result.Success ())
-          _
-            (Result.Error
-              (TypeError.init
-                (String.concat &[@"cannot unify Bool with " (type-kind right)]))))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Unit)
         (match-ref right
           (MonoType.Unit) (Result.Success ())
-          _ (Result.Error (TypeError.init @"cannot unify unit with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Named left-name left-arguments)
         (match-ref right
           (MonoType.Named right-name right-arguments)
@@ -987,21 +1102,9 @@ normalization can then look up inference variables in constant time.")
                   (Array.push-back! (TypeSolver.constructor-bindings solver)
                                     (Pair.init (String.copy &r) (String.copy &l)))
                   (solver-unify-arguments! solver left-arguments right-arguments))
-              (Result.Error
-                (TypeError.init
-                  (String.concat
-                    &[@"cannot unify "
-                      (String.copy &l)
-                      @" with "
-                      (String.copy &r)])))))
+              (Result.Error (mismatch left right))))
           _
-          (Result.Error
-            (TypeError.init
-              (String.concat
-                &[@"cannot unify "
-                  (String.copy left-name)
-                  @" with "
-                  (type-kind right)]))))
+          (Result.Error (mismatch left right)))
       (MonoType.Reference left-inner left-lifetime)
         (match-ref right
           (MonoType.Reference right-inner right-lifetime)
@@ -1011,11 +1114,7 @@ normalization can then look up inference variables in constant time.")
               (Result.Success _)
                 (solver-unify-lifetimes! solver left-lifetime right-lifetime)
               (Result.Error error) (Result.Error error))
-          _
-            (Result.Error
-              (TypeError.init
-                (String.concat
-                  &[@"cannot unify reference with " (type-kind right)]))))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Function left-arguments left-result)
         (match-ref right
           (MonoType.Function right-arguments right-result)
@@ -1024,9 +1123,7 @@ normalization can then look up inference variables in constant time.")
                                      (Box.peek left-result)
                                      right-arguments
                                      (Box.peek right-result))
-          _
-            (Result.Error
-              (TypeError.init @"cannot unify a function with this type")))
+          _ (Result.Error (mismatch left right)))
       (MonoType.Variable _)
         (Result.Error
           (TypeError.init @"internal error: unresolved left type variable"))))
@@ -1393,109 +1490,6 @@ lifetime identities. Specialization and ABI layout use this relation.")
   (doc name "renders a deterministic, identifier-safe type name for generated
 specialization symbols.")
   (defn name [type] (name-internal type))
-
-  ;; the variables of the type being rendered, in the order they first
-  ;; appear. A render names them from this list, so the same variable reads
-  ;; the same way everywhere in one type and no two variables share a name.
-  (def *render-names* (the (Array Int) []))
-
-  ;; the name the source gave each of those variables, when a scheme was
-  ;; rendered and knew them. Empty means the reader gets a letter.
-  (def *render-labels* (the (Array String) []))
-
-  (private variable-label)
-  (hidden variable-label)
-  (doc variable-label "the name a variable is rendered under: `a` for the
-first distinct one, `b` for the second, and after `z` a letter with a number
-after it. A variable the naming pass never saw keeps its identity rather than
-borrowing a name, which is what makes a stray one obvious.")
-  (defn variable-label [names variable]
-    (let-do [found -1
-             n (Array.length names)]
-      (for [i 0 n]
-        (when (Int.= @(Array.unsafe-nth names i) variable)
-          (when (Int.< found 0) (set! found i))))
-      (if (Int.< found 0)
-        (String.append "v" &(Int.str variable))
-        (let [given (if (Int.< found (Array.length &*render-labels*))
-                @(Array.unsafe-nth &*render-labels* found)
-                @"")]
-          (if (String.empty? &given)
-            (let [letter (String.from-chars
-                    &[(Char.from-int (Int.+ 97 (Int.mod found 26)))])
-                  cycle (Int./ found 26)]
-              (if (Int.= 0 cycle)
-                letter
-                (String.append &letter &(Int.str cycle))))
-            given)))))
-
-  (private collect-variables!)
-  (hidden collect-variables!)
-  (defn collect-variables! [type names]
-    (match-ref type
-      (MonoType.Variable variable)
-        (let-do [seen false
-                 n (Array.length names)]
-          (for [i 0 n]
-            (when (Int.= @(Array.unsafe-nth names i) @variable) (set! seen true)))
-          (unless seen (Array.push-back! names @variable)))
-      (MonoType.Named _ arguments)
-        (for [i 0 (Array.length arguments)]
-          (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
-      (MonoType.Reference inner _) (collect-variables! (Box.peek inner) names)
-      (MonoType.Function arguments result)
-        (do
-          (for [i 0 (Array.length arguments)]
-            (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
-          (collect-variables! (Box.peek result) names))
-      _ ()))
-
-  (private name-variables!)
-  (hidden name-variables!)
-  (defn name-variables! [type]
-    (let-do [names (the (Array Int) [])]
-      (collect-variables! type &names)
-      (set! *render-names* names)
-      (set! *render-labels* (the (Array String) []))))
-
-  (private render-arguments)
-  (hidden render-arguments)
-  (private render-internal)
-  (hidden render-internal)
-  (defn render-arguments [arguments]
-    (let-do [parts (the (Array String) [])
-             n (Array.length arguments)]
-      (for [i 0 n]
-        (Array.push-back! &parts
-                          (render-internal
-                            (Box.peek (Array.unsafe-nth arguments i)))))
-      (String.join " " &parts)))
-
-  (defn render-internal [type]
-    (match-ref type
-      (MonoType.Variable variable) (variable-label &*render-names* @variable)
-      (MonoType.Integer) @"Int"
-      (MonoType.String) @"String"
-      (MonoType.Boolean) @"Bool"
-      (MonoType.Unit) @"Unit"
-      (MonoType.Named type-name arguments)
-        (if (Int.= 0 (Array.length arguments))
-          (String.copy type-name)
-          (String.concat
-            &[@"("
-              (String.copy type-name)
-              @" "
-              (render-arguments arguments)
-              @")"]))
-      (MonoType.Reference inner _)
-        (String.concat &[@"(Ref " (render-internal (Box.peek inner)) @")"])
-      (MonoType.Function arguments result)
-        (String.concat
-          &[@"(Fn ["
-            (render-arguments arguments)
-            @"] "
-            (render-internal (Box.peek result))
-            @")"])))
 
   (doc render "renders a source-shaped type for diagnostics and editor APIs.
 Unlike `name`, this is intentionally human-readable and must not be used as an

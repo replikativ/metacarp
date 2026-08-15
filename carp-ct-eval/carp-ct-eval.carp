@@ -3064,7 +3064,16 @@ keep it as data (a macro reached through `apply`).")
         (if (or (Int.< argument-count fixed-count)
                 (and (Maybe.nothing? &rest) (/= fixed-count argument-count)))
           (Result.Error
-            (error-at call @"macro called with the wrong number of arguments"))
+            (error-at call
+                      (String.concat
+                        &[@"this macro takes "
+                          (if (Maybe.just? &rest)
+                            (String.concat &[@"at least " (Int.str fixed-count)])
+                            (Int.str fixed-count))
+                          (if (Int.= fixed-count 1)
+                            @" argument, got "
+                            @" arguments, got ")
+                          (Int.str argument-count)])))
           (let-do [macro-frame (child! state (CtClosure.defining-frame closure))]
             (for [i 0 fixed-count]
               (ignore

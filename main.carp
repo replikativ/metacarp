@@ -654,7 +654,8 @@
   (list (quote Unsafe.preproc)
         (list (quote Unsafe.emit-c)
               (String.concat [\"#include \\\"\" (relative-to (current-file) path) \"\\\"\"]))))
-" @&source])]
+(load \"__input__\")
+"])]
             (match (Surface.parse &root-text)
               (Result.Error _)
                 (do
@@ -662,19 +663,39 @@
                   (the (Maybe (Pair SurfaceModule String)) (Maybe.Nothing)))
               (Result.Success root-module)
                 (let-do [targets (collect-load-targets (SurfaceModule.forms &root-module))
+                         user-targets (match (Surface.parse &source)
+                           (Result.Success user-module)
+                             (collect-load-targets (SurfaceModule.forms &user-module))
+                           (Result.Error _) (the (Array String) []))
                          seed (the (Array (Pair String String)) [])
                          _ignored-seed (for [i 0 (Array.length &targets)]
                            (Array.push-back! &seed
                                              (Pair.init (String.copy input)
                                                         @(Array.unsafe-nth &targets
                                                                            i))))
+                         _ignored-user-seed (for [i
+                                                  0
+                                                  (Array.length &user-targets)]
+                           (Array.push-back! &seed
+                                             (Pair.init (String.copy input)
+                                                        @(Array.unsafe-nth &user-targets
+                                                                           i))))
                          registry (ensure-sources (read-core core-dir)
                                                   core-dir
                                                   &seed)]
+                  ;; the user's file is a source of its own rather than text
+                  ;; pasted after the prelude, so a position in it is a
+                  ;; position in it — which is what a reader, and an editor
+                  ;; underlining a diagnostic, needs
+                  (set! registry
+                        (Array.push-back registry
+                                         (ModuleSource.init @"__input__"
+                                                            (String.copy input)
+                                                            (String.copy &source))))
                   (set! registry
                         (Array.push-back registry
                                          (ModuleSource.init @root-name
-                                                            (String.copy input)
+                                                            @root-name
                                                             @&root-text)))
                   (phase! "sources-ready")
                   (match (ModuleLoader.load &registry &(String.copy root-name))

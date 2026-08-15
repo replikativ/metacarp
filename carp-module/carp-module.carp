@@ -156,67 +156,73 @@ to a load form; parse and missing-source errors have no source span yet.")
                 (ModuleError.init @"recursive module load" @path (Maybe.Nothing)))
             (contains? visited file) (Result.Success ())
             (match (Surface.parse (ModuleSource.text &source))
-              (Result.Error _)
-                (Result.Error
-                  (ModuleError.init @"module source could not be parsed"
-                                    @path
-                                    (Maybe.Nothing)))
+              ;; the parser knows the line, the column and what it did not
+              ;; expect; a loader that answers "could not be parsed" throws
+              ;; away everything the reader needs
+              (Result.Error parse-error)
+              (Result.Error
+                (ModuleError.init
+                  (String.concat
+                    &[(String.copy file)
+                      @": "
+                      (Parser.format-error &parse-error)])
+                  @path
+                  (Maybe.Nothing)))
               (Result.Success module)
-                (let-do [push-marker (load-stack-marker "load-stack-push!"
-                                                        &(Maybe.Just @(ModuleSource.file &source)))
-                         result (the (Result Unit ModuleError)
-                                     (Result.Success ()))
-                         next-active (Array.push-back @active (String.copy file))
-                         forms (SurfaceModule.forms &module)
-                         n (Array.length forms)]
-                  (Array.push-back! output (Box.init push-marker))
-                  (for [i 0 n]
-                    (match-ref &result
-                      (Result.Success _)
-                        (let [form (Box.peek (Array.unsafe-nth forms i))]
-                          (match (load-and-use-target form)
-                            (Maybe.Just module-name)
-                              (let [child-path (String.concat &[@&module-name
-                                                                @".carp"])]
+              (let-do [push-marker (load-stack-marker "load-stack-push!"
+                                                      &(Maybe.Just @(ModuleSource.file &source)))
+                       result (the (Result Unit ModuleError) (Result.Success ()))
+                       next-active (Array.push-back @active (String.copy file))
+                       forms (SurfaceModule.forms &module)
+                       n (Array.length forms)]
+                (Array.push-back! output (Box.init push-marker))
+                (for [i 0 n]
+                  (match-ref &result
+                    (Result.Success _)
+                      (let [form (Box.peek (Array.unsafe-nth forms i))]
+                        (match (load-and-use-target form)
+                          (Maybe.Just module-name)
+                            (let [child-path (String.concat &[@&module-name
+                                                              @".carp"])]
+                              (match (the (Result Unit ModuleError)
+                                          (load-path! sources
+                                                      &child-path
+                                                      &next-active
+                                                      visited
+                                                      output))
+                                (Result.Success _)
+                                  (Array.push-back! output
+                                                    (Box.init (use-node form
+                                                                        &module-name)))
+                                (Result.Error error)
+                                  (set! result (Result.Error error))))
+                          (Maybe.Nothing)
+                            (match (load-target form)
+                              (Maybe.Just child-path)
                                 (match (the (Result Unit ModuleError)
                                             (load-path! sources
                                                         &child-path
                                                         &next-active
                                                         visited
                                                         output))
-                                  (Result.Success _)
-                                    (Array.push-back! output
-                                                      (Box.init (use-node form
-                                                                          &module-name)))
+                                  (Result.Success _) ()
                                   (Result.Error error)
-                                    (set! result (Result.Error error))))
-                            (Maybe.Nothing)
-                              (match (load-target form)
-                                (Maybe.Just child-path)
-                                  (match (the (Result Unit ModuleError)
-                                              (load-path! sources
-                                                          &child-path
-                                                          &next-active
-                                                          visited
-                                                          output))
-                                    (Result.Success _) ()
-                                    (Result.Error error)
-                                      (set! result (Result.Error error)))
-                                (Maybe.Nothing)
-                                  (Array.push-back! output
-                                                    (Box.init (SurfaceNode.copy form))))))
-                      (Result.Error error) (set! result (Result.Error @error))))
-                  (match result
-                    (Result.Success _)
-                      (do
-                        (Array.push-back! output
-                                          (Box.init
-                                            (load-stack-marker "load-stack-pop!"
-                                                               &(the (Maybe String)
-                                                                     (Maybe.Nothing)))))
-                        (Array.push-back! visited (String.copy file))
-                        (Result.Success ()))
-                    (Result.Error error) (Result.Error error))))))))
+                                    (set! result (Result.Error error)))
+                              (Maybe.Nothing)
+                                (Array.push-back! output
+                                                  (Box.init (SurfaceNode.copy form))))))
+                    (Result.Error error) (set! result (Result.Error @error))))
+                (match result
+                  (Result.Success _)
+                    (do
+                      (Array.push-back! output
+                                        (Box.init
+                                          (load-stack-marker "load-stack-pop!"
+                                                             &(the (Maybe String)
+                                                                   (Maybe.Nothing)))))
+                      (Array.push-back! visited (String.copy file))
+                      (Result.Success ()))
+                  (Result.Error error) (Result.Error error))))))))
 
   (doc load "loads `root` from an in-memory source registry. Load directives
 are replaced by their transitive forms in source order, and a path is included

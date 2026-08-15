@@ -681,11 +681,17 @@ one.")
              result (the (Result CallSite SpecializeError)
                          (Result.Error
                            (SpecializeError.init
+                             ;; the interface and the type it was asked for are
+                             ;; the whole diagnosis, and what to do about it
+                             ;; follows from them: implement it for that type
                              (String.concat
-                               &[@"no implementation matches interface "
+                               &[@"no implementation of "
                                  (String.copy (CoreRef.name interface))
-                                 @" at "
-                                 (Type.render signature)]))))
+                                 @" for "
+                                 (Type.render signature)
+                                 @"; define one and say (implements "
+                                 (String.copy (CoreRef.name interface))
+                                 @" <your function>)"]))))
              implementations (CoreModule.implementations core)
              environment (InferredModule.environment inferred)
              found false
@@ -1060,9 +1066,11 @@ type. Empty when the program defines no `main`.")
 
   (private contextual-specialize-error)
   (hidden contextual-specialize-error)
+  (doc contextual-specialize-error "an error with the definition it came up
+in. The context leads, the way `in function f:` leads an inference error, so
+that a message ending in advice ends the sentence.")
   (defn contextual-specialize-error [origin message]
-    (String.concat
-      &[(String.copy message) @" while specializing " (String.copy origin)]))
+    (String.concat &[@"in " (String.copy origin) @": " (String.copy message)]))
 
   (private dependencies-for)
   (hidden dependencies-for)

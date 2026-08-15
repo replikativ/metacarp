@@ -2263,15 +2263,58 @@ the one whose inferred type unifies with the call site.")
   (private resolve-init-reference-name)
   (hidden resolve-init-reference-name)
 
-  (defn unknown-binding-error [node symbol scope locals]
-    (error-at node
-              (String.concat
-                &[@"unknown binding: "
-                  (String.copy symbol)
-                  @" in scope "
-                  (String.copy scope)
-                  @" with locals "
-                  (Int.str (Array.length locals))])))
+  (private name-distance)
+  (hidden name-distance)
+  (doc name-distance "how far apart two names are, counted as the letters one
+would have to change to reach the other. Names of very different lengths are
+not near each other whatever they share, which is what the first test says.")
+  (defn name-distance [left right]
+    (let-do [shorter (Int.min (String.length left) (String.length right))
+             longer (Int.max (String.length left) (String.length right))
+             differences (Int.- longer shorter)]
+      (if (Int.> differences 2)
+        1000
+        (do
+          (for [i 0 shorter]
+            (unless (Char.= (String.char-at left i) (String.char-at right i))
+              (set! differences (Int.inc differences))))
+          differences))))
+
+  (private nearest-name)
+  (hidden nearest-name)
+  (doc nearest-name "the known name closest to the one that was not found,
+when something is close enough to be worth suggesting. A typo is usually a
+letter or two away; anything further apart is a different word and guessing
+at it wastes the reader's time.")
+  (defn nearest-name [symbol globals locals]
+    (let-do [best @""
+             best-distance 3
+             n (Array.length globals)]
+      (for [i 0 n]
+        (let [candidate (CoreRef.name (Array.unsafe-nth globals i))
+              distance (name-distance symbol candidate)]
+          (when-do (Int.< distance best-distance)
+            (set! best-distance distance)
+            (set! best (String.copy candidate)))))
+      (for [i 0 (Array.length locals)]
+        (let [candidate (CoreRef.name (Array.unsafe-nth locals i))
+              distance (name-distance symbol candidate)]
+          (when-do (Int.< distance best-distance)
+            (set! best-distance distance)
+            (set! best (String.copy candidate)))))
+      best))
+
+  (defn unknown-binding-error [node symbol scope locals globals]
+    (let [suggestion (nearest-name symbol globals locals)
+          where (if (String.empty? scope)
+            @""
+            (String.concat &[@" in " (String.copy scope)]))
+          hint (if (String.empty? &suggestion)
+            @""
+            (String.concat &[@"; did you mean " @&suggestion @"?"]))]
+      (error-at node
+                (String.concat
+                  &[@"unknown binding " (String.copy symbol) where hint]))))
 
   ;; a qualified member the named module does not define falls back to the
   ;; bare top-level name: the reference resolves `(Char.>= a b)` to the global
@@ -2297,7 +2340,8 @@ the one whose inferred type unifies with the call site.")
               (match (unqualified-fallback-name globals symbol)
                 (Maybe.Just reference) (Result.Success reference)
                 (Maybe.Nothing)
-                  (Result.Error (unknown-binding-error node symbol scope locals)))))))
+                  (Result.Error
+                    (unknown-binding-error node symbol scope locals globals)))))))
 
   (private resolve-reference-name-raw)
   (hidden resolve-reference-name-raw)
@@ -2354,9 +2398,8 @@ as a written-out qualified one.")
           (Result.Error
             (error-at node
                       (String.concat
-                        &[@"the binding: "
-                          @(CoreRef.name &reference)
-                          @" is private; it may only be used within the module that defines it"])))
+                        &[@(CoreRef.name &reference)
+                          @" is private; it may only be used inside the module that defines it"])))
           (Result.Success reference))
       (Result.Error error) (Result.Error error)))
 
@@ -4377,13 +4420,28 @@ distinct identities.")
                     (Maybe.Nothing)
                       (set! result
                             (Result.Error
-                              (ResolveError.init @"unknown interface implementation"
-                                                 @(ImplementationShape.span shape)))))
+                              (ResolveError.init
+                                (let [suggestion (nearest-name implementation-name
+                                                               globals
+                                                               &(the (Array CoreRef)
+                                                                     []))]
+                                  (String.concat
+                                    &[@"unknown implementation "
+                                      (String.copy implementation-name)
+                                      (if (String.empty? &suggestion)
+                                        @""
+                                        (String.concat &[@"; did you mean "
+                                                         @&suggestion
+                                                         @"?"]))]))
+                                @(ImplementationShape.span shape)))))
                 (Maybe.Nothing)
                   (set! result
                         (Result.Error
-                          (ResolveError.init @"unknown interface"
-                                             @(ImplementationShape.span shape))))))
+                          (ResolveError.init
+                            (String.concat
+                              &[@"unknown interface "
+                                (String.copy interface-name)])
+                            @(ImplementationShape.span shape))))))
           (Result.Error _) ()))
       result))
 
