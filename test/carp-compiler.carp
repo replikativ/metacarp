@@ -304,6 +304,42 @@ answer")
            (and (contains-text? &c "widget_copy(") (contains-text? &c "deref"))) (Result.Error _)
       false))
 
+(defn emits-single-constructor-sum-copier? []
+  ;; A sum with ONE constructor has only tag 0. Deciding "is a sum" from the
+  ;; tags therefore skipped it, and an unmanaged one had no other source of a
+  ;; copier: the program emitted a call and a prototype for `<T>.copy` and
+  ;; failed to link. `(deftype SerializeError (NonFiniteNumber [Double]))` in
+  ;; the json library is exactly this shape.
+  (match (CarpCompiler.compile-source
+      "(deftype Fault (Bad [Double]))
+(defn duplicate []
+  (let [value (Fault.Bad 1.0)]
+    (ignore @&value)))
+(duplicate)")
+    (Result.Success c)
+      (let [signature (Type.function
+              [(Box.init
+                 (Type.reference (Type.named "Fault" []) (Type.lifetime 0)))]
+              (Type.named "Fault" []))
+            symbol (CAbi.mangle "Fault.copy" &signature)]
+        ;; a prototype and a call make two occurrences; the definition is the
+        ;; third, and its absence is what the linker used to report
+        (let-do [count (text-occurrences &c &symbol)]
+          (when (Int.< count 3)
+            (IO.println
+              &(fmt "single-constructor copier symbol=%s occurrences=%d"
+                    &symbol
+                    count)))
+          (Int.>= count 3)))
+    (Result.Error error)
+      (do
+        (IO.println
+          &(String.concat
+            &[(String.copy (CompileError.phase &error))
+              @": "
+              (String.copy (CompileError.message &error))]))
+        false)))
+
 (defn emits-concrete-generic-sum-copier? []
   (match (CarpCompiler.compile-source
       "(defmodule Int (register copy (Fn [(Ref Int)] Int) \"int_copy\"))
@@ -532,6 +568,9 @@ answer")
   (assert-true t
     (emits-concrete-generic-sum-copier?)
     "a concrete generic sum copy emits the derived copier body")
+  (assert-true t
+    (emits-single-constructor-sum-copier?)
+    "a sum with a single constructor emits the derived copier body")
   (assert-true t
     (emits-closure-environment-copier?)
     "capturing closures expose a deep-copy callback for their environment")

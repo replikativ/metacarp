@@ -294,24 +294,57 @@ deleter of their own.")
             (Maybe.Nothing) ())))
       result))
 
-  ;; every sum type (some constructor has a nonzero tag): reference Carp derives
-  ;; `copy` for every deftype. Generic sums need one polymorphic body that can
-  ;; specialize to both managed and unmanaged fields; unmanaged sums such as
-  ;; `Color.Id` still need one when they flow through `copy`. Records are covered
-  ;; by resolve's scalar-copy, so only sum types are collected here.
-  (defn sum-keys [core]
+  (private record-declaration?)
+  (hidden record-declaration?)
+  ;; a record declares its members; a sum type carries its data in its
+  ;; constructors and declares none.
+  (defn record-declaration? [declarations name]
+    (let-do [found false
+             n (Array.length declarations)]
+      (for [i 0 n]
+        (let [declaration (Array.unsafe-nth declarations i)]
+          (when (and (String.= (CoreTypeDeclaration.name declaration) name)
+                     (Int.> (Array.length (CoreTypeDeclaration.members declaration))
+                            0))
+            (set! found true))))
+      found))
+
+  ;; every sum type: reference Carp derives `copy` for every deftype. Generic
+  ;; sums need one polymorphic body that can specialize to both managed and
+  ;; unmanaged fields; unmanaged sums such as `Color.Id` still need one when
+  ;; they flow through `copy`. Records are covered by resolve's scalar-copy, so
+  ;; only sum types are collected here.
+  ;;
+  ;; A nonzero tag means "has more than one constructor", which misses a sum
+  ;; with a SINGLE one. Such a type gets no copier from here, and if it is
+  ;; unmanaged it gets none from `derive-target-keys` either, so a `<T>.copy`
+  ;; call site links against a body nothing emits.
+  ;;
+  ;; Only concrete single-constructor sums are added. Managed ones already
+  ;; arrive through `derive-target-keys`, and a GENERIC one cannot be judged
+  ;; from its declaration at all — `(deftype (Pair a b) (Init [a b]))` holds
+  ;; memory or not depending on the instance, and it has its own path through
+  ;; the managed instances.
+  (defn sum-keys [core managed]
     (let-do [constructors (CoreModule.constructors core)
+             declarations (CoreModule.type-declarations core)
              result (the (Array String) [])
              n (Array.length constructors)]
       (for [i 0 n]
         (let [c (Array.unsafe-nth constructors i)]
-          (when (Int.> @(CoreConstructorDeclaration.tag c) 0)
-            (match (core-base-type-key
-                (Box.peek (CoreConstructorDeclaration.result c)))
-              (Maybe.Just rkey)
-                (unless-do (contains-key? &result &rkey)
-                  (set! result (Array.push-back result rkey)))
-              (Maybe.Nothing) ()))))
+          (match-ref (Box.peek (CoreConstructorDeclaration.result c))
+            (CoreType.Named name arguments)
+              (match (core-base-type-key
+                  (Box.peek (CoreConstructorDeclaration.result c)))
+                (Maybe.Just rkey)
+                  (unless (contains-key? &result &rkey)
+                    (when (or (Int.> @(CoreConstructorDeclaration.tag c) 0)
+                              (and (Int.= 0 (Array.length arguments))
+                                   (and (not (record-declaration? declarations name))
+                                        (not (contains-key? managed &rkey)))))
+                      (set! result (Array.push-back result rkey))))
+                (Maybe.Nothing) ())
+            _ ())))
       result)))
 
 (defmodule Derive
@@ -2012,7 +2045,7 @@ sums retain a real specializable body instead of a body-less Core declaration.")
     (let-do [targets (derive-target-keys core)
              facts (OwnershipClassify.facts-from-module core)
              managed (managed-keys core (OwnershipTypeFacts.owned &facts))
-             extra (sum-keys core)
+             extra (sum-keys core &managed)
              constructors (CoreModule.constructors core)
              builtins (CoreModule.builtins core)
              new-functions (Array.copy (CoreModule.functions core))
