@@ -4553,9 +4553,10 @@ The source uses no standard library, because a phase resolves against the
 primitives it is given and nothing else.")
   (meta-set! a-resolved-module "example" true)
   (defn a-resolved-module []
-    (Result.unsafe-from-success
-      (Resolve.module &(Result.unsafe-from-success
-                         (Surface.parse "(defn identity [x] x)")))))
+    (Result.from-success
+      (Resolve.module &(Result.from-success (Surface.parse "(defn identity [x] x)")
+                                            (SurfaceModule.init [])))
+      (CoreIR.empty-module)))
 
   (doc a-resolved-definition-count "how many definitions a resolved module
 holds, the smallest thing worth asking it.")

@@ -919,16 +919,17 @@ traces retained once by `CompilerSession`.")
              (String.= (SourceInput.source current) (SourceInput.source previous))))))
 
   (defn rebuild-overlay-at [session inputs reuse index overlay]
-    (if (Int.= index (Array.length inputs))
-      (Result.Success (SessionOverlay.copy overlay))
-      (if (repeats-previous? inputs index)
+    (cond
+      (Int.= index (Array.length inputs))
+        (Result.Success (SessionOverlay.copy overlay))
+      (repeats-previous? inputs index)
         (rebuild-overlay-at session inputs reuse (Int.inc index) overlay)
-        (match (extend-overlay overlay
-                               (Array.unsafe-nth inputs index)
-                               @(Array.unsafe-nth reuse index))
-          (Result.Success next)
-            (rebuild-overlay-at session inputs reuse (Int.inc index) &next)
-          (Result.Error diagnostic) (Result.Error diagnostic)))))
+      (match (extend-overlay overlay
+                             (Array.unsafe-nth inputs index)
+                             @(Array.unsafe-nth reuse index))
+        (Result.Success next)
+          (rebuild-overlay-at session inputs reuse (Int.inc index) &next)
+        (Result.Error diagnostic) (Result.Error diagnostic))))
 
   (private rebuild-overlay)
   (hidden rebuild-overlay)
@@ -1526,10 +1527,9 @@ every entry belonging to an input id dropped.")
              old-reuse (SessionOverlay.references overlay)
              n (Array.length old-inputs)]
       (for [i 0 n]
-        (unless (String.= (SourceInput.id (Array.unsafe-nth old-inputs i)) id)
-          (do
-            (Array.push-back! &inputs (SourceInput.copy (Array.unsafe-nth old-inputs i)))
-            (Array.push-back! &reuse @(Array.unsafe-nth old-reuse i)))))
+        (unless-do (String.= (SourceInput.id (Array.unsafe-nth old-inputs i)) id)
+          (Array.push-back! &inputs (SourceInput.copy (Array.unsafe-nth old-inputs i)))
+          (Array.push-back! &reuse @(Array.unsafe-nth old-reuse i))))
       (Pair.init inputs reuse)))
 
   (private definitions-of-input)
@@ -1565,10 +1565,9 @@ identity is its name rather than its file.")
         (Array.push-back! &reuse (the (Maybe CoreRef) (Maybe.Nothing)))
         (match (rebuild-overlay session &inputs &reuse next-id)
           (Result.Success rebuilt)
-            (let [committed (definitions-of-input &rebuilt (SourceInput.id input))]
-              (do
-                (set-overlay! session rebuilt)
-                (Result.Success committed)))
+            (let-do [committed (definitions-of-input &rebuilt (SourceInput.id input))]
+              (set-overlay! session rebuilt)
+              (Result.Success committed))
           (Result.Error diagnostic) (Result.Error diagnostic)))))
 
   (doc remove-input "drops everything an input contributed, as deleting the

@@ -3723,17 +3723,26 @@ prelude modules.")
 resolver actually sees, which is not what you wrote.")
   (meta-set! an-expanded-module "example" true)
   (defn an-expanded-module []
-    (Result.unsafe-from-success
+    (Result.from-success
       (MacroExpand.expand-module-with
-        &(Result.unsafe-from-success (Surface.parse "(defn twice [x] (+ x x))"))
-        &(ExpandConfig.init []))))
+        &(Result.from-success (Surface.parse "(defn twice [x] (+ x x))")
+                              (SurfaceModule.init []))
+        &(ExpandConfig.init []))
+      (SurfaceModule.init [])))
 
   (doc an-inferred-module "a resolved module with a scheme for every
 definition in it.")
   (meta-set! an-inferred-module "example" true)
   (defn an-inferred-module []
-    (Result.unsafe-from-success
-      (Infer.module &(Resolve.a-resolved-module))))
+    ;; an empty result stands in for a failure the example cannot have: the
+    ;; module it infers is a literal one, and it resolves
+    (Result.from-success (Infer.module &(Resolve.a-resolved-module))
+                         (InferredModule.init []
+                                             []
+                                             []
+                                             []
+                                             []
+                                             (TypeSubstitution.init [] [] []))))
 
   (doc an-inferred-scheme "the type inference found for a definition, written
 the way a diagnostic writes it.")
@@ -3755,8 +3764,8 @@ is the compiler's actual output. Standalone, so it uses no standard library:
 `compile-sources` is the entry that takes one.")
   (meta-set! a-compiled-translation-unit "example" true)
   (defn a-compiled-translation-unit []
-    (Result.unsafe-from-success
-      (CarpCompiler.compile-source "(defn main [] ())")))
+    (Result.from-success (CarpCompiler.compile-source "(defn main [] ())")
+                         @"/* this program did not compile */"))
 
   (doc a-compile-error "what the driver answers when a program does not
 compile: the phase that rejected it, and why.")
