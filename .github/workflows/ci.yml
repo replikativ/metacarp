@@ -43,7 +43,7 @@ jobs:
         uses: actions/cache@v5
         with:
           path: carp-compiler/.ci-tools/bin
-          key: style-tools-${{ runner.os }}-${{ runner.arch }}-carp-8e190f2c5e077cb078450ec83e26c67bc7d4be90-a5432454a7945e481da6255b1e34aacf5fb01d4c-2a3672781ec6126fa1a536903654e331b423d9b5
+          key: style-tools-${{ runner.os }}-${{ runner.arch }}-carp-8e190f2c5e077cb078450ec83e26c67bc7d4be90-fd6d6826d830263d9f66c7b55cfc7e33b90eb337-13d3c0246dbc6b9b4004ebc222afab85f4235af7
 
       - name: Install angler and carp-fmt
         if: steps.style-tools-cache.outputs.cache-hit != 'true'
@@ -53,7 +53,7 @@ jobs:
 
           git init /tmp/angler
           git -C /tmp/angler remote add origin https://github.com/carpentry-org/angler
-          git -C /tmp/angler fetch --depth 1 origin a5432454a7945e481da6255b1e34aacf5fb01d4c
+          git -C /tmp/angler fetch --depth 1 origin fd6d6826d830263d9f66c7b55cfc7e33b90eb337
           git -C /tmp/angler checkout --detach FETCH_HEAD
           (cd /tmp/angler && carp -b main.carp)
           install -m 755 /tmp/angler/out/angler \
@@ -61,7 +61,7 @@ jobs:
 
           git init /tmp/carp-fmt
           git -C /tmp/carp-fmt remote add origin https://github.com/carpentry-org/carp-fmt
-          git -C /tmp/carp-fmt fetch --depth 1 origin 2a3672781ec6126fa1a536903654e331b423d9b5
+          git -C /tmp/carp-fmt fetch --depth 1 origin 13d3c0246dbc6b9b4004ebc222afab85f4235af7
           git -C /tmp/carp-fmt checkout --detach FETCH_HEAD
           (cd /tmp/carp-fmt && carp -b main.carp)
           install -m 755 /tmp/carp-fmt/out/carp-fmt \

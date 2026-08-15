@@ -498,7 +498,7 @@
             (Result.Success committed)
               (do
                 (unless (Int.= 2 (Array.length &committed)) (set! ok false))
-                (let [definitions (Session.definitions &session)]
+                (let-do [definitions (Session.definitions &session)]
                   (when (definition-named? &definitions "beta") (set! ok false))
                   (when (definition-named? &definitions "gamma") (set! ok false))
                   (unless (definition-named? &definitions "delta")
@@ -507,7 +507,7 @@
         ;; and removing the input drops everything it contributed
         (match (Session.remove-input &session "module.carp")
           (Result.Success _)
-            (let [definitions (Session.definitions &session)]
+            (let-do [definitions (Session.definitions &session)]
               (when (definition-named? &definitions "alpha") (set! ok false))
               (when (definition-named? &definitions "delta") (set! ok false)))
           (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
@@ -609,10 +609,10 @@
         (match (Session.upsert &session &dependent)
           (Result.Success _) ()
           (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
-        (let [first-id (session-reference-id &session "stable")
-              dependent-id (session-reference-id &session "stable-user")
-              replacement (SourceInput.init (String.copy "definition:stable:v2")
-                                            (String.copy "(defn stable [x] x)"))]
+        (let-do [first-id (session-reference-id &session "stable")
+                 dependent-id (session-reference-id &session "stable-user")
+                 replacement (SourceInput.init (String.copy "definition:stable:v2")
+                                               (String.copy "(defn stable [x] x)"))]
           (match (Session.upsert &session &replacement)
             (Result.Success _) ()
             (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))

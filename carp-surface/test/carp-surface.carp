@@ -23,34 +23,49 @@
     (SurfaceSpan.in-source (SurfaceNode.span definition)
                            (SourceInput.id (SourcedSurfaceModule.input &sourced)))))
 
-(deftest t
-  (let [module (parsed-module "; documentation
-(defn id [x] x)")] (assert-equal t
-      2
-      (Array.length (SurfaceModule.forms &module))
-      "surface lowering retains top-level ordering") (assert-true t
-      (match-ref (form-at &module 0) (SurfaceForm.Comment _) true _ false)
-      "comments are retained for source tools") (assert-true t
-      (match-ref (form-at &module 1) (SurfaceForm.List _) true _ false)
-      "lists lower to the surface list variant") (assert-equal t
-      2
-      @(Info.line (SurfaceSpan.start (SurfaceNode.span (node-at &module 1))))
-      "node span starts at reader location"))
+(defn reader-forms-module [] (parsed-module "&value $[1 2] {:a true}"))
 
-  (let [module (parsed-module "&value $[1 2] {:a true}")]
-    (assert-equal t
-      3
-      (Array.length (SurfaceModule.forms &module))
-      "one surface node is produced per reader form")
-    (assert-true t
-      (match-ref (form-at &module 0) (SurfaceForm.List _) true _ false)
-      "reader macros stay normalized as reader lists")
-    (assert-true t
-      (match-ref (form-at &module 1) (SurfaceForm.StaticArray _) true _ false)
-      "static arrays retain their syntax category")
-    (assert-true t
-      (match-ref (form-at &module 2) (SurfaceForm.Dictionary _) true _ false)
-      "dictionaries retain their syntax category"))
+(defn commented-module [] (parsed-module "; documentation
+(defn id [x] x)"))
+
+(deftest t
+  (assert-equal t
+    2
+    (Array.length (SurfaceModule.forms &(commented-module)))
+    "surface lowering retains top-level ordering")
+  (assert-true t
+    (match-ref (form-at &(commented-module) 0)
+      (SurfaceForm.Comment _) true
+      _ false)
+    "comments are retained for source tools")
+  (assert-true t
+    (match-ref (form-at &(commented-module) 1) (SurfaceForm.List _) true _ false)
+    "lists lower to the surface list variant")
+  (assert-equal t
+    2
+    @(Info.line
+      (SurfaceSpan.start (SurfaceNode.span (node-at &(commented-module) 1))))
+    "node span starts at reader location")
+
+  (assert-equal t
+    3
+    (Array.length (SurfaceModule.forms &(reader-forms-module)))
+    "one surface node is produced per reader form")
+  (assert-true t
+    (match-ref (form-at &(reader-forms-module) 0)
+      (SurfaceForm.List _) true
+      _ false)
+    "reader macros stay normalized as reader lists")
+  (assert-true t
+    (match-ref (form-at &(reader-forms-module) 1)
+      (SurfaceForm.StaticArray _) true
+      _ false)
+    "static arrays retain their syntax category")
+  (assert-true t
+    (match-ref (form-at &(reader-forms-module) 2)
+      (SurfaceForm.Dictionary _) true
+      _ false)
+    "dictionaries retain their syntax category")
 
   (assert-true t
     (Result.error? &(Surface.parse "("))

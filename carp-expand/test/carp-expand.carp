@@ -429,41 +429,130 @@
   (let [module (expanded-module "(defmacro splice [] `[0 %@(array 1 2) 9])
 (splice)")] (Int.= 0 (Array.length (SurfaceModule.forms &module)))))
 
-(deftest t
-  (let [module (expanded-module
-          "(defmacro when [condition body] `(if %condition %body ()))
-(when true 42)")
-        form (node-at &module 0)]
-    (assert-equal t
-      1
-      (Array.length (SurfaceModule.forms &module))
-      "macro definitions are omitted from the expanded module")
-    (assert-true t
-      (is-symbol? (list-item &form 0) "if")
-      "a quasiquoted macro body is evaluated")
-    (assert-true t
-      (match-ref (SurfaceNode.form (list-item &form 1))
-        (SurfaceForm.BoolLit true) true
-        _ false)
-      "unquote inserts the first call-site argument")
-    (assert-true t
-      (match-ref (SurfaceNode.form (list-item &form 2))
-        (SurfaceForm.IntLit 42) true
-        _ false)
-      "unquote inserts the second call-site argument"))
+(defn when-expansion []
+  (expanded-module "(defmacro when [condition body] `(if %condition %body ()))
+(when true 42)"))
 
-  (let [module (expanded-module
-          "(defmacro unless [condition body] `(if %condition () %body))
+(defn when-macro-omits-definitions? []
+  (let [module (when-expansion)]
+    (Int.= 1 (Array.length (SurfaceModule.forms &module)))))
+
+(defn when-macro-expands-body? []
+  (let [module (when-expansion)
+        form (node-at &module 0)
+        head (list-item &form 0)]
+    (is-symbol? &head "if")))
+
+(defn when-macro-unquotes-condition? []
+  (let [module (when-expansion)
+        form (node-at &module 0)
+        condition (list-item &form 1)]
+    (match-ref (SurfaceNode.form &condition)
+      (SurfaceForm.BoolLit value) @value
+      _ false)))
+
+(defn when-macro-unquotes-body? []
+  (let [module (when-expansion)
+        form (node-at &module 0)
+        body (list-item &form 2)]
+    (match-ref (SurfaceNode.form &body)
+      (SurfaceForm.IntLit value) (Int.= @value 42)
+      _ false)))
+
+(defn nested-macro-expansion []
+  (expanded-module "(defmacro unless [condition body] `(if %condition () %body))
 (defmacro when-not [condition body] `(unless %condition %body))
-(when-not false 7)")
+(when-not false 7)"))
+
+(defn nested-macros-omit-definitions? []
+  (let [module (nested-macro-expansion)]
+    (Int.= 1 (Array.length (SurfaceModule.forms &module)))))
+
+(defn nested-macros-expand-recursively? []
+  (let [module (nested-macro-expansion)
+        form (node-at &module 0)
+        head (list-item &form 0)]
+    (is-symbol? &head "if")))
+
+(defn chosen-expansion []
+  (expanded-module
+    "(defmacro choose [flag x] (let [saved x] (if flag (do `(do %saved)) `(do 0))))
+(choose true 7)"))
+
+(defn compile-time-if-selects-form? []
+  (let [module (chosen-expansion)
+        form (node-at &module 0)
+        head (list-item &form 0)]
+    (is-symbol? &head "do")))
+
+(defn compile-time-let-reaches-quasiquote? []
+  (let [module (chosen-expansion)
+        form (node-at &module 0)
+        value (list-item &form 1)]
+    (match-ref (SurfaceNode.form &value)
+      (SurfaceForm.IntLit actual) (Int.= @actual 7)
+      _ false)))
+
+(defn unchosen-expansion []
+  (expanded-module
+    "(defmacro choose [flag x] (let [saved x] (if flag (do `(do %saved)) `(do 0))))
+(choose false 7)"))
+
+(defn compile-time-if-takes-false-branch? []
+  (let [module (unchosen-expansion)
+        form (node-at &module 0)
+        value (list-item &form 1)]
+    (match-ref (SurfaceNode.form &value)
+      (SurfaceForm.IntLit actual) (Int.= @actual 0)
+      _ false)))
+
+(defn compile-time-let-binds-left-to-right? []
+  (let [module (expanded-module
+          "(defmacro first-of [x y] (let [first x second first] second))
+(first-of 3 9)")
         form (node-at &module 0)]
-    (assert-equal t
-      1
-      (Array.length (SurfaceModule.forms &module))
-      "all source-order macro definitions are omitted")
-    (assert-true t
-      (is-symbol? (list-item &form 0) "if")
-      "macro results are expanded recursively"))
+    (match-ref (SurfaceNode.form &form)
+      (SurfaceForm.IntLit value) (Int.= @value 3)
+      _ false)))
+
+(defn variadic-expansion []
+  (expanded-module "(defmacro do-all [first :rest rest] `(do %first %@rest))
+(do-all 1 2 3)"))
+
+(defn variadic-macro-quasiquotes? []
+  (let [module (variadic-expansion)
+        form (node-at &module 0)
+        head (list-item &form 0)]
+    (is-symbol? &head "do")))
+
+(defn variadic-macro-splices-rest? []
+  (let [module (variadic-expansion)
+        form (node-at &module 0)
+        third (list-item &form 3)]
+    (match-ref (SurfaceNode.form &third)
+      (SurfaceForm.IntLit value) (Int.= @value 3)
+      _ false)))
+
+(deftest t
+  (assert-true t
+    (when-macro-omits-definitions?)
+    "macro definitions are omitted from the expanded module")
+  (assert-true t
+    (when-macro-expands-body?)
+    "a quasiquoted macro body is evaluated")
+  (assert-true t
+    (when-macro-unquotes-condition?)
+    "unquote inserts the first call-site argument")
+  (assert-true t
+    (when-macro-unquotes-body?)
+    "unquote inserts the second call-site argument")
+
+  (assert-true t
+    (nested-macros-omit-definitions?)
+    "all source-order macro definitions are omitted")
+  (assert-true t
+    (nested-macros-expand-recursively?)
+    "macro results are expanded recursively")
 
   (let [module (expanded-module
           "(defmacro when [condition body] `(if %condition %body ()))
@@ -484,52 +573,25 @@
         _ false)
       "macros in reopened modules capture same-module dynamic aliases"))
 
-  (let [module (expanded-module
-          "(defmacro choose [flag x] (let [saved x] (if flag (do `(do %saved)) `(do 0))))
-(choose true 7)")
-        form (node-at &module 0)
-        head (list-item &form 0)
-        value (list-item &form 1)]
-    (assert-true t
-      (is-symbol? &head "do")
-      "compile-time control flow selects a generated form")
-    (assert-true t
-      (match-ref (SurfaceNode.form &value) (SurfaceForm.IntLit 7) true _ false)
-      "compile-time let values are visible to quasiquote"))
+  (assert-true t
+    (compile-time-if-selects-form?)
+    "compile-time control flow selects a generated form")
+  (assert-true t
+    (compile-time-let-reaches-quasiquote?)
+    "compile-time let values are visible to quasiquote")
 
-  (let [module (expanded-module
-          "(defmacro choose [flag x] (let [saved x] (if flag (do `(do %saved)) `(do 0))))
-(choose false 7)")
-        form (node-at &module 0)
-        value (list-item &form 1)
-        let-module (expanded-module
-          "(defmacro first-of [x y] (let [first x second first] second))
-(first-of 3 9)")
-        let-form (node-at &let-module 0)
-        variadic-module (expanded-module
-          "(defmacro do-all [first :rest rest] `(do %first %@rest))
-(do-all 1 2 3)")
-        variadic-form (node-at &variadic-module 0)
-        variadic-head (list-item &variadic-form 0)
-        variadic-third (list-item &variadic-form 3)]
-    (assert-true t
-      (match-ref (SurfaceNode.form &value)
-        (SurfaceForm.IntLit actual) (Int.= @actual 0)
-        _ false)
-      "compile-time if evaluates its false branch")
-    (assert-true t
-      (match-ref (SurfaceNode.form &let-form)
-        (SurfaceForm.IntLit value) (Int.= @value 3)
-        _ false)
-      "compile-time let extends bindings from left to right")
-    (assert-true t
-      (is-symbol? &variadic-head "do")
-      "a variadic macro expands to a quasiquoted form")
-    (assert-true t
-      (match-ref (SurfaceNode.form &variadic-third)
-        (SurfaceForm.IntLit value) (Int.= @value 3)
-        _ false)
-      "unquote-splicing inserts all rest arguments"))
+  (assert-true t
+    (compile-time-if-takes-false-branch?)
+    "compile-time if evaluates its false branch")
+  (assert-true t
+    (compile-time-let-binds-left-to-right?)
+    "compile-time let extends bindings from left to right")
+  (assert-true t
+    (variadic-macro-quasiquotes?)
+    "a variadic macro expands to a quasiquoted form")
+  (assert-true t
+    (variadic-macro-splices-rest?)
+    "unquote-splicing inserts all rest arguments")
 
   (let [module (Result.from-success (Surface.parse "(defmacro identity [x] x)
 (identity 1 2)") (SurfaceModule.init []))] (assert-true t
