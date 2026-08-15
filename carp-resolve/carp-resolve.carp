@@ -4545,6 +4545,24 @@ historical owner-relative expression IDs.")
              _ignored-reuse (set! *resolve-reuse-globals* [])]
       (module-inner surface)))
 
+  ;; Examples: what this phase turns syntax into.
+
+  (doc a-resolved-module "surface syntax lowered to core IR: names are bound
+to references, and everything downstream works on this rather than on text.
+The source uses no standard library, because a phase resolves against the
+primitives it is given and nothing else.")
+  (meta-set! a-resolved-module "example" true)
+  (defn a-resolved-module []
+    (Result.unsafe-from-success
+      (Resolve.module &(Result.unsafe-from-success
+                         (Surface.parse "(defn identity [x] x)")))))
+
+  (doc a-resolved-definition-count "how many definitions a resolved module
+holds, the smallest thing worth asking it.")
+  (meta-set! a-resolved-definition-count "example" true)
+  (defn a-resolved-definition-count []
+    (Array.length (CoreModule.functions &(a-resolved-module))))
+
   (doc module-with-provenance "resolves caller-identified syntax with node IDs
 from a caller-owned monotonic allocator, returning the core IR and source map.")
   (defn module-with-provenance [sourced allocator]

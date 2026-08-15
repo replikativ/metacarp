@@ -1428,4 +1428,41 @@ specialization symbols.")
   (doc render "renders a source-shaped type for diagnostics and editor APIs.
 Unlike `name`, this is intentionally human-readable and must not be used as an
 ABI or specialization key.")
-  (defn render [type] (render-internal type)))
+  (defn render [type] (render-internal type))
+
+  ;; Examples: definitions that say they are examples. Each answers a real
+  ;; artifact of this phase, so the browser can attach it to the type it
+  ;; returns and to whatever it calls, and running one shows the artifact
+  ;; itself rather than a description of it.
+
+  (doc a-function-type "the type of a function from an Int to a String.")
+  (meta-set! a-function-type "example" true)
+  (defn a-function-type []
+    (Type.function [(Box.init (Type.integer))] (Type.string)))
+
+  (doc a-generic-container-type "a nominal type applied to an argument, the
+shape every user container has: (Array Int).")
+  (meta-set! a-generic-container-type "example" true)
+  (defn a-generic-container-type []
+    (Type.named "Array" [(Box.init (Type.integer))]))
+
+  (doc a-borrowed-type "a borrowed type with an inferred lifetime, what a
+parameter written `&x` infers to.")
+  (meta-set! a-borrowed-type "example" true)
+  (defn a-borrowed-type []
+    (Type.reference (Type.string) (Type.lifetime 0)))
+
+  (doc an-unsolved-variable "an inference variable, before the solver has
+anything to say about it.")
+  (meta-set! an-unsolved-variable "example" true)
+  (defn an-unsolved-variable [] (Type.variable 1))
+
+  (doc a-rendered-type "what a type looks like in a diagnostic: source-shaped
+rather than the mangled ABI key.")
+  (meta-set! a-rendered-type "example" true)
+  (defn a-rendered-type [] (Type.render &(a-function-type)))
+
+  (doc an-abi-key "the other spelling of a type: the mangled key
+specialization uses to tell instances apart.")
+  (meta-set! an-abi-key "example" true)
+  (defn an-abi-key [] (Type.name &(a-function-type))))

@@ -370,3 +370,38 @@ source span.")
   (doc str "renders a surface module as newline-separated source-level forms.")
   (defn str [module] (Surface.render-module module))
   (implements str SurfaceModule.str))
+
+(defmodule Surface
+  ;; Examples: each answers the artifact this phase produces, so it can be
+  ;; read, opened and run rather than described.
+
+  (doc a-parsed-definition "a definition as the parser leaves it: surface
+syntax, spans and all, before anything has been resolved.")
+  (meta-set! a-parsed-definition "example" true)
+  (defn a-parsed-definition []
+    (Result.unsafe-from-success
+      (Surface.parse "(defn double [x] (* 2 x))")))
+
+  (doc a-parsed-module "a whole module of surface forms, which is what a file
+looks like to everything downstream.")
+  (meta-set! a-parsed-module "example" true)
+  (defn a-parsed-module []
+    (Result.unsafe-from-success
+      (Surface.parse "(deftype Point [x Int y Int])
+(defn origin [] (Point.init 0 0))")))
+
+  (doc a-round-tripped-form "surface syntax rendered back to source. The
+parser keeps enough to print what it read, which is what the macro stepper
+shows you between steps.")
+  (meta-set! a-round-tripped-form "example" true)
+  (defn a-round-tripped-form []
+    (Surface.render-module &(a-parsed-definition)))
+
+  (doc a-parse-diagnostic "what a parse failure looks like from the API: a
+phase, a message, and where it happened.")
+  (meta-set! a-parse-diagnostic "example" true)
+  (defn a-parse-diagnostic []
+    (match (Surface.parse-input-diagnosed &(SourceInput.init @"example" @"(defn broken ["))
+      (Result.Error diagnostic) diagnostic
+      (Result.Success _)
+        (Diagnostic.init @"parse" @"this source parses" (Maybe.Nothing)))))

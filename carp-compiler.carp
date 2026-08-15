@@ -3713,6 +3713,59 @@ prelude modules.")
   (defn compile-source [source]
     (let [config (ExpandConfig.init [])] (compile-source-with source &config)))
 
+  ;; Examples: the pipeline, one artifact at a time. Each answers what a real
+  ;; compilation would hold at that point, so they can be read and opened
+  ;; rather than described. They live here rather than in the phase libraries
+  ;; because a phase does not depend on the one before it — the driver is the
+  ;; only place that has all of them.
+
+  (doc an-expanded-module "surface syntax after macro expansion: what the
+resolver actually sees, which is not what you wrote.")
+  (meta-set! an-expanded-module "example" true)
+  (defn an-expanded-module []
+    (Result.unsafe-from-success
+      (MacroExpand.expand-module-with
+        &(Result.unsafe-from-success (Surface.parse "(defn twice [x] (+ x x))"))
+        &(ExpandConfig.init []))))
+
+  (doc an-inferred-module "a resolved module with a scheme for every
+definition in it.")
+  (meta-set! an-inferred-module "example" true)
+  (defn an-inferred-module []
+    (Result.unsafe-from-success
+      (Infer.module &(Resolve.a-resolved-module))))
+
+  (doc an-inferred-scheme "the type inference found for a definition, written
+the way a diagnostic writes it.")
+  (meta-set! an-inferred-scheme "example" true)
+  (defn an-inferred-scheme []
+    (let-do [inferred (an-inferred-module)
+             environment (InferredModule.environment &inferred)
+             answer @"(identity was not inferred)"]
+      (for [i 0 (Array.length environment)]
+        (let [binding (Array.unsafe-nth environment i)]
+          (when (String.= (CoreRef.name (SchemeBinding.reference binding)) "identity")
+            (set! answer
+                  (Type.render
+                    (Box.peek (TypeScheme.body (SchemeBinding.scheme binding))))))))
+      answer))
+
+  (doc a-compiled-translation-unit "the C a whole program compiles to, which
+is the compiler's actual output. Standalone, so it uses no standard library:
+`compile-sources` is the entry that takes one.")
+  (meta-set! a-compiled-translation-unit "example" true)
+  (defn a-compiled-translation-unit []
+    (Result.unsafe-from-success
+      (CarpCompiler.compile-source "(defn main [] ())")))
+
+  (doc a-compile-error "what the driver answers when a program does not
+compile: the phase that rejected it, and why.")
+  (meta-set! a-compile-error "example" true)
+  (defn a-compile-error []
+    (match (CarpCompiler.compile-source "(defn main [] (undefined-name 1))")
+      (Result.Error error) error
+      (Result.Success _) (CompileError.init @"none" @"this program compiles")))
+
   (doc compile-sources-with "loads a root from an in-memory source registry,
 then compiles the resulting deterministic module stream.")
   (defn compile-sources-with [sources root config]
