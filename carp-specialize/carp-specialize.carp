@@ -618,6 +618,40 @@ its concrete node types, so none of these memoized values are needed afterward."
   (hidden implementation-for)
   (private copy-call-owner)
   (hidden copy-call-owner)
+  (private constructor-structure)
+  (hidden constructor-structure)
+  (doc constructor-structure "how constrained a declared type is: one point
+per type its shape names. A bare variable names nothing and scores zero, so
+an implementation for `(Duo a b)` outranks a fallback for `a` however many
+parameters the type takes — the parameters are what the implementation is
+generic in, not what it is vague about.
+
+A constructor variable — the head of `(f a)` — names nothing either, which is
+what keeps a generic-over-containers implementation from beating a concrete
+one.")
+  (defn constructor-structure [type]
+    (match-ref type
+      (MonoType.Variable _) 0
+      (MonoType.Named name arguments)
+        (let-do [score (if (Type.constructor-variable? name) 0 1)]
+          (for [i 0 (Array.length arguments)]
+            (set! score
+                  (Int.+ score
+                         (constructor-structure
+                           (Box.peek (Array.unsafe-nth arguments i))))))
+          score)
+      (MonoType.Reference inner _)
+        (Int.+ 1 (constructor-structure (Box.peek inner)))
+      (MonoType.Function arguments result)
+        (let-do [score (Int.+ 1 (constructor-structure (Box.peek result)))]
+          (for [i 0 (Array.length arguments)]
+            (set! score
+                  (Int.+ score
+                         (constructor-structure
+                           (Box.peek (Array.unsafe-nth arguments i))))))
+          score)
+      _ 1))
+
   (private constructor-generality)
   (hidden constructor-generality)
   (defn constructor-generality [type]
@@ -659,6 +693,7 @@ its concrete node types, so none of these memoized values are needed afterward."
              found-type (String.copy "")
              found-reference (CoreRef.init -1 (String.copy "") true)
              found-specificity 1000000
+             found-structure -1
              n (Array.length implementations)]
       (for [i 0 n]
         (let [candidate (Array.unsafe-nth implementations i)]
@@ -678,6 +713,7 @@ its concrete node types, so none of these memoized values are needed afterward."
                             ;; variables in its declared type) wins; only a tie at
                             ;; the same specificity is a genuine ambiguity.
                             declared-type (Box.peek (TypeScheme.body &scheme))
+                            candidate-structure (constructor-structure declared-type)
                             candidate-specificity (Int.+
                               (Array.length &(Type.free-variables declared-type))
                               (constructor-generality declared-type))]
@@ -689,9 +725,15 @@ its concrete node types, so none of these memoized values are needed afterward."
                                                                       signature))
                           (cond
                             (or (not found)
-                                (Int.< candidate-specificity found-specificity))
+                                (or
+                                  (Int.> candidate-structure found-structure)
+                                  (and
+                                    (Int.= candidate-structure found-structure)
+                                    (Int.< candidate-specificity
+                                           found-specificity))))
                               (do
                                 (set! found true)
+                                (set! found-structure candidate-structure)
                                 (set! found-specificity candidate-specificity)
                                 (set! found-name
                                       @(CoreRef.name
@@ -706,7 +748,9 @@ its concrete node types, so none of these memoized values are needed afterward."
                                                        @(CoreImplementation.implementation candidate)
                                                        (Box.init implementation-type)
                                                        (copy-call-owner call)))))
-                            (Int.= candidate-specificity found-specificity)
+                            (and
+                              (Int.= candidate-structure found-structure)
+                              (Int.= candidate-specificity found-specificity))
                               (do
                                 (set! found-name
                                       @(CoreRef.name
