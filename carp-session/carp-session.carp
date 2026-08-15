@@ -1684,7 +1684,9 @@ top-level form. Returns `Nothing` when no top-level form is a macro call.")
   (doc emit-cell "emits a deterministic executable C translation unit for a
 transient cell against the warm committed environment. Expansion, identity
 allocation, inference, and code generation occur on private copies and cannot
-mutate the session.")
+mutate the session. A cell is a top level, so a value it ends on is echoed the
+way the driver echoes one, and a client does not have to guess whether a type's
+`str` takes its argument by reference or by value.")
   (private emit-mark!)
   (hidden emit-mark!)
   ;; Prints elapsed milliseconds per emit-cell step under CARP_DEBUG_EMIT, the
@@ -1749,8 +1751,8 @@ it. Optional: emit-cell does it on demand.")
                                        complete-inferred (append-inferred-analysis &warm-inferred
                                                                                    &inferred)
                                        _m4 (emit-mark! "analysis-appended" started)]
-                                (match (CarpCompiler.compile-inferred-module &complete-core
-                                                                             &complete-inferred)
+                                (match (CarpCompiler.compile-inferred-module-echoed &complete-core
+                                                                                    &complete-inferred)
                                   (Result.Success c)
                                     (do (emit-mark! "compiled" started) (Result.Success c))
                                   (Result.Error error)

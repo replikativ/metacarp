@@ -134,10 +134,47 @@ the scope ended: an owned capture is copied in at the construction site.")
                 (String.copy (Diagnostic.message &diagnostic))]))
           false))))
 
+(doc echoes-a-derived-value?
+  "A cell ending on a value whose `str` is derived. Derived strs take their
+argument by reference and scalar ones by value, so a client cannot wrap the
+expression itself: the emitted program echoes the result the way the driver
+echoes a top-level one.")
+(defn echoes-a-derived-value? []
+  (let [dir (core-dir)]
+    (match (Session.create &dir)
+      (Result.Success session)
+        (let [cell (SourceInput.init
+                     (String.copy "cell:echo")
+                     (String.copy "(deftype Point [x Int])
+(Point.init 3)"))]
+          (match (Session.emit-cell &session &cell)
+            (Result.Success c)
+              (and (String.contains-string? &c "String echo = C13_Point_x46_str")
+                   (String.contains-string? &c "IO_println((&echo))"))
+            (Result.Error diagnostic)
+              (do
+                (IO.println
+                  &(String.concat
+                    &[(String.copy (Diagnostic.phase &diagnostic))
+                      @": "
+                      (String.copy (Diagnostic.message &diagnostic))]))
+                false)))
+      (Result.Error diagnostic)
+        (do
+          (IO.println
+            &(String.concat
+              &[(String.copy (Diagnostic.phase &diagnostic))
+                @": "
+                (String.copy (Diagnostic.message &diagnostic))]))
+          false))))
+
 (deftest t
   (assert-true t
     (creates-real-core-session?)
     "Session.create loads core once and checks a cell against it")
+  (assert-true t
+    (echoes-a-derived-value?)
+    "Session.emit-cell echoes a cell's result through the str the driver picks")
   (assert-true t
     (emits-after-committed-empty-map?)
     "Session.emit-cell specializes Core calls reached through committed values")

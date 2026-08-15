@@ -3523,36 +3523,52 @@ declaration when a fallback span is available.")
     (let-do [_ignored (phase-mark! "phase: lowered")]
       (CBackend.executable-translation-unit &backend)))
 
-  (doc compile-inferred-module "specializes, ownership-plans, lowers, and
-renders an already derived and inferred module. Warm compiler clients use this
-entry point to avoid repeating expansion, resolution, derivation, and
-inference for their resident environment.")
-  (defn compile-inferred-module [core inferred]
+  (private compile-inferred-module-with)
+  (hidden compile-inferred-module-with)
+  (defn compile-inferred-module-with [core inferred echo]
     (let-do [facts (OwnershipClassify.facts-from-module core)
              seeds (Specialize.named-requests core
                                               inferred
                                               &(the (Array String) []))]
       (match (specialize-closed core inferred &facts &seeds)
         (Result.Success closed)
-          (let-do [final (Pair.a &closed)
-                   delete-symbols (delete-symbols-for core final)
-                   copy-symbols (copy-symbols-for core final)
-                   closed-without-echo (Pair.init closed
-                                                  (the (Maybe EchoPlan)
-                                                       (Maybe.Nothing)))]
-            (match (lower-owned closed-without-echo delete-symbols copy-symbols)
-              (Result.Success backend)
-                (match (render-owned backend)
-                  (Result.Success c) (Result.Success c)
+          (match (if echo
+                   (echo-augment core inferred &facts &seeds &closed)
+                   (Result.Success
+                     (Pair.init (Pair.copy &closed)
+                                (the (Maybe EchoPlan) (Maybe.Nothing)))))
+            (Result.Success closed-with-echo)
+              (let [final (Pair.a &closed-with-echo)
+                    delete-symbols (delete-symbols-for core (Pair.a final))
+                    copy-symbols (copy-symbols-for core (Pair.a final))]
+                (match (lower-owned closed-with-echo delete-symbols copy-symbols)
+                  (Result.Success backend)
+                    (match (render-owned backend)
+                      (Result.Success c) (Result.Success c)
+                      (Result.Error error)
+                        (Result.Error
+                          (CompileError.init (String.copy "backend")
+                                             @(BackendError.message &error))))
                   (Result.Error error)
                     (Result.Error
                       (CompileError.init (String.copy "backend")
-                                         @(BackendError.message &error))))
-              (Result.Error error)
-                (Result.Error
-                  (CompileError.init (String.copy "backend")
-                                     @(BackendError.message &error)))))
+                                         @(BackendError.message &error)))))
+            (Result.Error error) (Result.Error error))
         (Result.Error error) (Result.Error error))))
+
+  (doc compile-inferred-module "specializes, ownership-plans, lowers, and
+renders an already derived and inferred module. Warm compiler clients use this
+entry point to avoid repeating expansion, resolution, derivation, and
+inference for their resident environment.")
+  (defn compile-inferred-module [core inferred]
+    (compile-inferred-module-with core inferred false))
+
+  (doc compile-inferred-module-echoed "as `compile-inferred-module`, but with
+the top-level result echo the driver gives a whole program: a warm client's
+cell is a top-level, and a value it ends on is printed by the same `str` the
+driver would pick — by reference for a derived one, by value for a scalar.")
+  (defn compile-inferred-module-echoed [core inferred]
+    (compile-inferred-module-with core inferred true))
 
   (defn compile-module-full [module config check-names echo]
     (match (MacroExpand.expand-module-with module config)
