@@ -4554,8 +4554,9 @@ primitives it is given and nothing else.")
   (meta-set! a-resolved-module "example" true)
   (defn a-resolved-module []
     (Result.from-success
-      (Resolve.module &(Result.from-success (Surface.parse "(defn identity [x] x)")
-                                            (SurfaceModule.init [])))
+      (Resolve.module
+        &(Result.from-success (Surface.parse "(defn identity [x] x)")
+                              (SurfaceModule.init [])))
       (CoreIR.empty-module)))
 
   (doc a-resolved-definition-count "how many definitions a resolved module

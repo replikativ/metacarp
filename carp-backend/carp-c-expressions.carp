@@ -796,7 +796,8 @@ address taken here is always an lvalue.")
                                          (Int.str i)
                                          @" = "
                                          (render-env-field-value &value
-                                                                 (Box.peek (Array.unsafe-nth arguments i)))]))))
+                                                                 (Box.peek (Array.unsafe-nth arguments
+                                                                                             i)))]))))
             (Result.Error error) (set! failure (Maybe.Just error)))
         (Maybe.Just _) ()))
     (match-ref &failure

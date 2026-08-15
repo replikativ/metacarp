@@ -535,10 +535,10 @@
     (read-git-source name)
     (let [requester-dir (dir-of requester-file)
           local (if (String.starts-with? name "/")
-                  (normalize-path name)
-                  (normalize-path
-                    &(String.concat
-                      &[(String.copy &requester-dir) @"/" (String.copy name)])))]
+            (normalize-path name)
+            (normalize-path
+              &(String.concat
+                &[(String.copy &requester-dir) @"/" (String.copy name)])))]
       (match (if (same-path-ignoring-case? &local
                                            &(normalize-path requester-file))
           (Result.Error @"self")

@@ -249,14 +249,12 @@ answer")
 (deftype (Pair a b) (Init [a b]))
 (register mk-pair (Fn [Widget Int] (Pair Widget Int)) \"mk_pair\")
 (defn drop-pair [] (let [p (mk-pair (make-widget) 3)] 0))
-(drop-pair)")
-    (Result.Success c)
+(drop-pair)") (Result.Success c)
       (and (contains-text? &c "Pair_x46_delete")
            ;; the unmanaged Int field is an Ignore slot now, so no `int field1`
            ;; binding is emitted; only the managed Widget field is deleted.
            (and (not (contains-text? &c "int field1"))
-                (contains-text? &c "widget_delete(")))
-    (Result.Error _) false))
+                (contains-text? &c "widget_delete("))) (Result.Error _) false))
 
 (defn lowers-by-reference-match? []
   (match (CarpCompiler.compile-source "(deftype Point [x Int])
@@ -310,13 +308,11 @@ answer")
   ;; copier: the program emitted a call and a prototype for `<T>.copy` and
   ;; failed to link. `(deftype SerializeError (NonFiniteNumber [Double]))` in
   ;; the json library is exactly this shape.
-  (match (CarpCompiler.compile-source
-      "(deftype Fault (Bad [Double]))
+  (match (CarpCompiler.compile-source "(deftype Fault (Bad [Double]))
 (defn duplicate []
   (let [value (Fault.Bad 1.0)]
     (ignore @&value)))
-(duplicate)")
-    (Result.Success c)
+(duplicate)") (Result.Success c)
       (let [signature (Type.function
               [(Box.init
                  (Type.reference (Type.named "Fault" []) (Type.lifetime 0)))]
@@ -327,11 +323,11 @@ answer")
         (let-do [count (text-occurrences &c &symbol)]
           (when (Int.< count 3)
             (IO.println
-              &(fmt "single-constructor copier symbol=%s occurrences=%d"
-                    &symbol
-                    count)))
-          (Int.>= count 3)))
-    (Result.Error error)
+              &(fmt
+                "single-constructor copier symbol=%s occurrences=%d"
+                &symbol
+                count)))
+          (Int.>= count 3))) (Result.Error error)
       (do
         (IO.println
           &(String.concat

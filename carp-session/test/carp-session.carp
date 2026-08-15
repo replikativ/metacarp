@@ -446,7 +446,9 @@
 (defn definition-named? [definitions name]
   (let-do [found false]
     (for [i 0 (Array.length definitions)]
-      (when (String.= (SessionDefInfo.name (Array.unsafe-nth definitions i)) name)
+      (when (String.=
+          (SessionDefInfo.name (Array.unsafe-nth definitions i))
+          name)
         (set! found true)))
     found))
 
@@ -475,11 +477,16 @@
                            (and (definition-named? &committed "beta")
                                 (definition-named? &committed "gamma")))
                 (set! ok false))
-              (unless (String.= &(definition-source-id &committed "beta") "module.carp")
+              (unless (String.=
+                  &(definition-source-id &committed "beta")
+                  "module.carp")
                 (set! ok false))
               ;; distinct spans: each definition points at its own text
-              (unless (Int./= @(SourceSpan.start (SessionDefInfo.span (Array.unsafe-nth &committed 0)))
-                              @(SourceSpan.start (SessionDefInfo.span (Array.unsafe-nth &committed 1))))
+              (unless (Int./=
+                  @(SourceSpan.start
+                    (SessionDefInfo.span (Array.unsafe-nth &committed 0)))
+                  @(SourceSpan.start
+                    (SessionDefInfo.span (Array.unsafe-nth &committed 1))))
                 (set! ok false)))
           (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
         ;; re-upserting the same id replaces what that input contributed, so a
@@ -494,7 +501,8 @@
                 (let [definitions (Session.definitions &session)]
                   (when (definition-named? &definitions "beta") (set! ok false))
                   (when (definition-named? &definitions "gamma") (set! ok false))
-                  (unless (definition-named? &definitions "delta") (set! ok false))))
+                  (unless (definition-named? &definitions "delta")
+                    (set! ok false))))
             (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic))))
         ;; and removing the input drops everything it contributed
         (match (Session.remove-input &session "module.carp")

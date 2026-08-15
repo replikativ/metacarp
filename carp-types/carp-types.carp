@@ -1449,8 +1449,7 @@ shape every user container has: (Array Int).")
   (doc a-borrowed-type "a borrowed type with an inferred lifetime, what a
 parameter written `&x` infers to.")
   (meta-set! a-borrowed-type "example" true)
-  (defn a-borrowed-type []
-    (Type.reference (Type.string) (Type.lifetime 0)))
+  (defn a-borrowed-type [] (Type.reference (Type.string) (Type.lifetime 0)))
 
   (doc an-unsolved-variable "an inference variable, before the solver has
 anything to say about it.")

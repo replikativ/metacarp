@@ -2429,10 +2429,11 @@ it in.")
       (CallSite.init -1
                      (PrimitiveRegistry.reference 0 "copy")
                      (Box.init
-                       (MonoType.Function [(Box.init
-                                             (MonoType.Reference (Box.init (MonoType.copy type))
-                                                                 (MonoLifetime.Static)))]
-                                          (Box.init (MonoType.copy type))))
+                       (MonoType.Function
+                         [(Box.init
+                            (MonoType.Reference (Box.init (MonoType.copy type))
+                                                (MonoLifetime.Static)))]
+                         (Box.init (MonoType.copy type))))
                      (Maybe.Nothing))
       (String.copy "closure capture copy")))
 

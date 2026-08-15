@@ -170,22 +170,28 @@ committed definition makes a dormant polymorphic call reachable.")
       (for [i 0 (Array.length (InferredModule.environment overlay))]
         (Array.push-back! &environment
                           (SchemeBinding.copy
-                            (Array.unsafe-nth (InferredModule.environment overlay) i))))
+                            (Array.unsafe-nth (InferredModule.environment overlay)
+                                              i))))
       (for [i 0 (Array.length (InferredModule.expression-types overlay))]
         (Array.push-back! &expression-types
                           (Box.copy
-                            (Array.unsafe-nth (InferredModule.expression-types overlay) i))))
+                            (Array.unsafe-nth
+                              (InferredModule.expression-types overlay)
+                              i))))
       (for [i 0 (Array.length (InferredModule.calls overlay))]
         (Array.push-back! &calls
-                          (CallSite.copy (Array.unsafe-nth (InferredModule.calls overlay) i))))
+                          (CallSite.copy
+                            (Array.unsafe-nth (InferredModule.calls overlay) i))))
       (for [i 0 (Array.length (InferredModule.node-types overlay))]
         (Array.push-back! &node-types
                           (InferredNodeType.copy
-                            (Array.unsafe-nth (InferredModule.node-types overlay) i))))
+                            (Array.unsafe-nth (InferredModule.node-types overlay)
+                                              i))))
       (for [i 0 (Array.length (InferredModule.binding-types overlay))]
         (Array.push-back! &binding-types
                           (InferredBindingType.copy
-                            (Array.unsafe-nth (InferredModule.binding-types overlay) i))))
+                            (Array.unsafe-nth (InferredModule.binding-types overlay)
+                                              i))))
       (InferredModule.init environment
                            expression-types
                            calls
@@ -730,16 +736,20 @@ traces retained once by `CompilerSession`.")
                  stored-references (Array.copy (SessionOverlay.references overlay))
                  found-count (Array.length &found)
                  _ignored-definitions (for [d 0 found-count]
-                   (let-do [reference (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes d))
-                            references (CoreIR.global-dependencies core reference)
+                   (let-do [reference (SpannedSchemeBinding.reference (Array.unsafe-nth &schemes
+                                                                                        d))
+                            references (CoreIR.global-dependencies core
+                                                                   reference)
                             dependency-names (the (Array String) [])]
                      (for [i 0 (Array.length &references)]
                        (Array.push-back! &dependency-names
                                          (String.copy
-                                           (CoreRef.name (Array.unsafe-nth &references i)))))
+                                           (CoreRef.name (Array.unsafe-nth &references
+                                                                           i)))))
                      (Array.push-back! &inputs (SourceInput.copy input))
                      (Array.push-back! &definitions
-                                       (SessionDefInfo.copy (Array.unsafe-nth &found d)))
+                                       (SessionDefInfo.copy (Array.unsafe-nth &found
+                                                                              d)))
                      (Array.push-back! &dependencies dependency-names)
                      (Array.push-back! &stored-references
                                        (Maybe.Just (CoreRef.copy reference)))))
@@ -915,8 +925,9 @@ traces retained once by `CompilerSession`.")
       false
       (let [current (Array.unsafe-nth inputs index)
             previous (Array.unsafe-nth inputs (Int.dec index))]
-        (and (String.= (SourceInput.id current) (SourceInput.id previous))
-             (String.= (SourceInput.source current) (SourceInput.source previous))))))
+        (and
+          (String.= (SourceInput.id current) (SourceInput.id previous))
+          (String.= (SourceInput.source current) (SourceInput.source previous))))))
 
   (defn rebuild-overlay-at [session inputs reuse index overlay]
     (cond
@@ -1114,7 +1125,8 @@ library under `core-dir` once, producing a warm compiler session.")
 
   (private set-overlay!)
   (hidden set-overlay!)
-  (doc set-overlay! "replaces the session's overlay — the one place it changes,
+  (doc set-overlay!
+    "replaces the session's overlay — the one place it changes,
 so anything later derived from it has a single place to be invalidated from.")
   (defn set-overlay! [session next]
     (Array.aset! (CompilerSession.overlay session) 0 next))
@@ -1132,8 +1144,9 @@ holds what the user has committed since.")
       (when (Int.= (Array.length (CompilerSession.analysis session)) 0)
         (Array.push-back! (CompilerSession.analysis session)
                           (normalized-analysis (CompilerSession.base-inferred session))))
-      (concat-analysis (Array.unsafe-nth (CompilerSession.analysis session) 0)
-                       &(normalized-analysis (SessionOverlay.inferred overlay)))))
+      (concat-analysis
+        (Array.unsafe-nth (CompilerSession.analysis session) 0)
+        &(normalized-analysis (SessionOverlay.inferred overlay)))))
 
   (doc reset "drops committed user definitions while retaining the warm core.")
   (defn reset [session]
@@ -1517,9 +1530,8 @@ reports its transitive resolved dependents.")
   (doc without-input "the overlay's inputs and their reuse references with
 every entry belonging to an input id dropped.")
   (sig without-input
-       (Fn
-         [(Ref SessionOverlay) (Ref String)]
-         (Pair (Array SourceInput) (Array (Maybe CoreRef)))))
+       (Fn [(Ref SessionOverlay) (Ref String)]
+           (Pair (Array SourceInput) (Array (Maybe CoreRef)))))
   (defn without-input [overlay id]
     (let-do [inputs (the (Array SourceInput) [])
              reuse (the (Array (Maybe CoreRef)) [])
@@ -1528,7 +1540,8 @@ every entry belonging to an input id dropped.")
              n (Array.length old-inputs)]
       (for [i 0 n]
         (unless-do (String.= (SourceInput.id (Array.unsafe-nth old-inputs i)) id)
-          (Array.push-back! &inputs (SourceInput.copy (Array.unsafe-nth old-inputs i)))
+          (Array.push-back! &inputs
+                            (SourceInput.copy (Array.unsafe-nth old-inputs i)))
           (Array.push-back! &reuse @(Array.unsafe-nth old-reuse i))))
       (Pair.init inputs reuse)))
 
@@ -1557,15 +1570,16 @@ identity is its name rather than its file.")
     (let [current (Array.unsafe-nth (CompilerSession.overlay session) 0)
           kept (without-input current (SourceInput.id input))
           next-id @(Array.unsafe-nth
-                     (IdAllocator.cell (SessionOverlay.node-allocator current))
-                     0)]
+            (IdAllocator.cell (SessionOverlay.node-allocator current))
+            0)]
       (let-do [inputs (Array.copy (Pair.a &kept))
                reuse (Array.copy (Pair.b &kept))]
         (Array.push-back! &inputs (SourceInput.copy input))
         (Array.push-back! &reuse (the (Maybe CoreRef) (Maybe.Nothing)))
         (match (rebuild-overlay session &inputs &reuse next-id)
           (Result.Success rebuilt)
-            (let-do [committed (definitions-of-input &rebuilt (SourceInput.id input))]
+            (let-do [committed (definitions-of-input &rebuilt
+                                                     (SourceInput.id input))]
               (set-overlay! session rebuilt)
               (Result.Success committed))
           (Result.Error diagnostic) (Result.Error diagnostic)))))
@@ -1578,13 +1592,11 @@ file would.")
     (let [current (Array.unsafe-nth (CompilerSession.overlay session) 0)
           kept (without-input current id)
           next-id @(Array.unsafe-nth
-                     (IdAllocator.cell (SessionOverlay.node-allocator current))
-                     0)]
+            (IdAllocator.cell (SessionOverlay.node-allocator current))
+            0)]
       (match (rebuild-overlay session (Pair.a &kept) (Pair.b &kept) next-id)
         (Result.Success rebuilt)
-          (do
-            (set-overlay! session rebuilt)
-            (Result.Success ()))
+          (do (set-overlay! session rebuilt) (Result.Success ()))
         (Result.Error diagnostic) (Result.Error diagnostic))))
 
   (doc remove "removes a definition and its transitive resolved dependents.")
@@ -1696,10 +1708,13 @@ way the driver echoes one, and a client does not have to guess whether a type's
   (defn emit-mark! [name since]
     (match (IO.getenv "CARP_DEBUG_EMIT")
       (Maybe.Just _)
-        (IO.errorln &(fmt "emit %s: %.0f ms"
-                          name
-                          (Double./ (Double.from-long (Uint64.to-long (Uint64.- (System.nanotime) since)))
-                                    1000000.0)))
+        (IO.errorln
+          &(fmt "emit %s: %.0f ms"
+                name
+                (Double./
+                  (Double.from-long
+                    (Uint64.to-long (Uint64.- (System.nanotime) since)))
+                  1000000.0)))
       (Maybe.Nothing) ()))
 
   (doc prepare-emit "does the session-wide work that emitting a cell needs —
@@ -1747,14 +1762,18 @@ it. Optional: emit-cell does it on demand.")
                                                                             (ProvenancedCoreModule.core &derived))
                                        _m3 (emit-mark! "core-appended" started)
                                        warm-inferred (inferred-environment-with-analysis (SessionOverlay.inferred overlay)
-                                                                                         &(session-analysis session overlay))
+                                                                                         &(session-analysis session
+                                                                                                            overlay))
                                        complete-inferred (append-inferred-analysis &warm-inferred
                                                                                    &inferred)
-                                       _m4 (emit-mark! "analysis-appended" started)]
+                                       _m4 (emit-mark! "analysis-appended"
+                                                       started)]
                                 (match (CarpCompiler.compile-inferred-module-echoed &complete-core
                                                                                     &complete-inferred)
                                   (Result.Success c)
-                                    (do (emit-mark! "compiled" started) (Result.Success c))
+                                    (do
+                                      (emit-mark! "compiled" started)
+                                      (Result.Success c))
                                   (Result.Error error)
                                     (Result.Error (compile-diagnostic &error
                                                                       input))))

@@ -8,126 +8,145 @@
 ; itself must not depend on: they are part of what a session holds, never
 ; part of what the compiler builds.
 
-(defview metacarp-type [t MonoType]
-  (=> (NB.text)
-      (NB.title @"Type")
-      (NB.content (Type.render t))))
+(defview metacarp-type
+         [t MonoType]
+         (=> (NB.text) (NB.title @"Type") (NB.content (Type.render t))))
 
-(defview metacarp-type-abi [t MonoType]
-  (=> (NB.text)
-      (NB.title @"ABI key")
-      (NB.content (Type.name t))))
+(defview metacarp-type-abi
+         [t MonoType]
+         (=> (NB.text) (NB.title @"ABI key") (NB.content (Type.name t))))
 
 (doc metacarp-type-parts "the parts a type is made of: the arguments of a
 nominal application or a function, each of which is a type you can open.")
-(defview metacarp-type-parts [t MonoType]
-  (let [parts (let [boxed (match-ref t
-                            (MonoType.Named _ arguments) @arguments
-                            (MonoType.Function arguments _) @arguments
-                            (MonoType.Reference inner _) [(Box.copy inner)]
-                            _ (the (Array (Box MonoType)) []))]
-                (Array.copy-map &(fn [b] @(Box.peek b)) &boxed))]
-    (if (Int.= 0 (Array.length &parts))
-      (NB.empty)
-      (=> (NB.columned)
-          (NB.title @"Parts")
-          (NB.with-columns [(NB.column @"#" (fn [i] (str i)))
-                            (NB.column @"Type"
-                                       (fn [i]
-                                         (Type.render (Array.unsafe-nth &parts i))))])
-          (NB.items (fn [] (Array.length &parts)))
-          (NB.send (fn [i] (nb-register @(Array.unsafe-nth &parts i))))))))
+(defview metacarp-type-parts
+         [t MonoType]
+         (let [parts (let [boxed (match-ref t
+                             (MonoType.Named _ arguments) @arguments
+                             (MonoType.Function arguments _) @arguments
+                             (MonoType.Reference inner _) [(Box.copy inner)]
+                             _ (the (Array (Box MonoType)) []))]
+                 (Array.copy-map &(fn [b] @(Box.peek b)) &boxed))]
+           (if (Int.= 0 (Array.length &parts))
+             (NB.empty)
+             (=> (NB.columned)
+                 (NB.title @"Parts")
+                 (NB.with-columns
+                   [(NB.column @"#" (fn [i] (str i)))
+                    (NB.column @"Type"
+                               (fn [i] (Type.render (Array.unsafe-nth &parts i))))])
+                 (NB.items (fn [] (Array.length &parts)))
+                 (NB.send (fn [i] (nb-register @(Array.unsafe-nth &parts i))))))))
 
-(defview metacarp-diagnostic [d Diagnostic]
-  (=> (NB.text)
-      (NB.title @"Diagnostic")
-      (NB.content (String.concat &[@(Diagnostic.phase d)
-                                   @": "
-                                   @(Diagnostic.message d)]))))
+(defview metacarp-diagnostic
+         [d Diagnostic]
+         (=> (NB.text)
+             (NB.title @"Diagnostic")
+             (NB.content
+               (String.concat
+                 &[@(Diagnostic.phase d) @": " @(Diagnostic.message d)]))))
 
 (doc metacarp-diagnostic-span "where the diagnostic points, when the phase
 that raised it had provenance to point with.")
-(defview metacarp-diagnostic-span [d Diagnostic]
-  (match-ref (Diagnostic.span d)
-    (Maybe.Just span)
-      (=> (NB.columned)
-          (NB.title @"Span")
-          (NB.with-columns [(NB.column @"Field"
-                                       (fn [i]
-                                         (cond
-                                           (Int.= i 0) @"input"
-                                           (Int.= i 1) @"start"
-                                           @"end")))
-                            (NB.column @"Value"
-                                       (fn [i]
-                                         (cond
-                                           (Int.= i 0) @(SourceSpan.source-id span)
-                                           (Int.= i 1) (str @(SourceSpan.start span))
-                                           (str @(SourceSpan.end span)))))])
-          (NB.items (fn [] 3)))
-    (Maybe.Nothing) (NB.empty)))
+(defview metacarp-diagnostic-span
+         [d Diagnostic]
+         (match-ref (Diagnostic.span d)
+           (Maybe.Just span)
+             (=> (NB.columned)
+                 (NB.title @"Span")
+                 (NB.with-columns
+                   [(NB.column @"Field"
+                               (fn [i]
+                                 (cond
+                                   (Int.= i 0) @"input"
+                                   (Int.= i 1) @"start"
+                                   @"end")))
+                    (NB.column @"Value"
+                               (fn [i]
+                                 (cond
+                                   (Int.= i 0) @(SourceSpan.source-id span)
+                                   (Int.= i 1) (str @(SourceSpan.start span))
+                                   (str @(SourceSpan.end span)))))])
+                 (NB.items (fn [] 3)))
+           (Maybe.Nothing) (NB.empty)))
 
 ;; --- surface syntax ------------------------------------------------------
 
-(defview metacarp-surface-source [n SurfaceNode]
-  (=> (NB.text)
-      (NB.title @"Source")
-      (NB.content (Surface.render n))))
+(defview metacarp-surface-source
+         [n SurfaceNode]
+         (=> (NB.text) (NB.title @"Source") (NB.content (Surface.render n))))
 
 (doc metacarp-surface-forms "a parsed file, one form per row. Each opens as
 the node it is, which is how you walk what the parser actually saw.")
-(defview metacarp-surface-forms [m SurfaceModule]
-  (let [forms (Array.copy-map &(fn [f] @(Box.peek f)) (SurfaceModule.forms m))]
-    (=> (NB.columned)
-        (NB.title @"Forms")
-        (NB.with-columns [(NB.column @"#" (fn [i] (str i)))
-                          (NB.column @"Form"
-                                     (fn [i]
-                                       (NB.cap (Surface.render (Array.unsafe-nth &forms i)))))])
-        (NB.items (fn [] (Array.length &forms)))
-        (NB.send (fn [i] (nb-register @(Array.unsafe-nth &forms i)))))))
+(defview metacarp-surface-forms
+         [m SurfaceModule]
+         (let [forms (Array.copy-map &(fn [f] @(Box.peek f))
+                                     (SurfaceModule.forms m))]
+           (=> (NB.columned)
+               (NB.title @"Forms")
+               (NB.with-columns
+                 [(NB.column @"#" (fn [i] (str i)))
+                  (NB.column @"Form"
+                             (fn [i]
+                               (NB.cap
+                                 (Surface.render (Array.unsafe-nth &forms i)))))])
+               (NB.items (fn [] (Array.length &forms)))
+               (NB.send (fn [i] (nb-register @(Array.unsafe-nth &forms i)))))))
 
 ;; --- resolved and inferred programs --------------------------------------
 
 (doc metacarp-core-definitions "what a resolved module defines, which is the
 shape every later phase works on.")
-(defview metacarp-core-definitions [m CoreModule]
-  (let [functions (Array.copy-map &(fn [f] @(CoreRef.name (CoreFunction.reference f)))
-                                  (CoreModule.functions m))]
-    (=> (NB.columned)
-        (NB.title @"Definitions")
-        (NB.with-columns [(NB.column @"#" (fn [i] (str i)))
-                          (NB.column @"Name" (fn [i] @(Array.unsafe-nth &functions i)))])
-        (NB.items (fn [] (Array.length &functions))))))
+(defview metacarp-core-definitions
+         [m CoreModule]
+         (let [functions (Array.copy-map
+                 &(fn [f] @(CoreRef.name (CoreFunction.reference f)))
+                 (CoreModule.functions m))]
+           (=> (NB.columned)
+               (NB.title @"Definitions")
+               (NB.with-columns
+                 [(NB.column @"#" (fn [i] (str i)))
+                  (NB.column @"Name" (fn [i] @(Array.unsafe-nth &functions i)))])
+               (NB.items (fn [] (Array.length &functions))))))
 
 (doc metacarp-core-shape "the parts a resolved module carries, so an empty
 one is distinguishable from a full one at a glance.")
-(defview metacarp-core-shape [m CoreModule]
-  (let [counts [(Array.length (CoreModule.functions m))
-                (Array.length (CoreModule.values m))
-                (Array.length (CoreModule.type-declarations m))
-                (Array.length (CoreModule.constructors m))
-                (Array.length (CoreModule.interfaces m))
-                (Array.length (CoreModule.implementations m))]
-        names [@"functions" @"values" @"types" @"constructors" @"interfaces"
-               @"implementations"]]
-    (=> (NB.columned)
-        (NB.title @"Shape")
-        (NB.with-columns [(NB.column @"Part" (fn [i] @(Array.unsafe-nth &names i)))
-                          (NB.column @"Count"
-                                     (fn [i] (str @(Array.unsafe-nth &counts i))))])
-        (NB.items (fn [] 6)))))
+(defview metacarp-core-shape
+         [m CoreModule]
+         (let [counts [(Array.length (CoreModule.functions m))
+                       (Array.length (CoreModule.values m))
+                       (Array.length (CoreModule.type-declarations m))
+                       (Array.length (CoreModule.constructors m))
+                       (Array.length (CoreModule.interfaces m))
+                       (Array.length (CoreModule.implementations m))]
+               names [@"functions"
+                      @"values"
+                      @"types"
+                      @"constructors"
+                      @"interfaces"
+                      @"implementations"]]
+           (=> (NB.columned)
+               (NB.title @"Shape")
+               (NB.with-columns
+                 [(NB.column @"Part" (fn [i] @(Array.unsafe-nth &names i)))
+                  (NB.column @"Count"
+                             (fn [i] (str @(Array.unsafe-nth &counts i))))])
+               (NB.items (fn [] 6)))))
 
 (doc metacarp-inferred-schemes "every definition inference gave a scheme,
 rendered the way a diagnostic renders a type.")
-(defview metacarp-inferred-schemes [m InferredModule]
-  (let [names (Array.copy-map &(fn [b] @(CoreRef.name (SchemeBinding.reference b)))
-                              (InferredModule.environment m))
-        types (Array.copy-map &(fn [b]
-                                 (Type.render (Box.peek (TypeScheme.body (SchemeBinding.scheme b)))))
-                              (InferredModule.environment m))]
-    (=> (NB.columned)
-        (NB.title @"Schemes")
-        (NB.with-columns [(NB.column @"Name" (fn [i] @(Array.unsafe-nth &names i)))
-                          (NB.column @"Type" (fn [i] @(Array.unsafe-nth &types i)))])
-        (NB.items (fn [] (Array.length &names))))))
+(defview metacarp-inferred-schemes
+         [m InferredModule]
+         (let [names (Array.copy-map
+                 &(fn [b] @(CoreRef.name (SchemeBinding.reference b)))
+                 (InferredModule.environment m))
+               types (Array.copy-map
+                 &(fn [b]
+                   (Type.render
+                     (Box.peek (TypeScheme.body (SchemeBinding.scheme b)))))
+                 (InferredModule.environment m))]
+           (=> (NB.columned)
+               (NB.title @"Schemes")
+               (NB.with-columns
+                 [(NB.column @"Name" (fn [i] @(Array.unsafe-nth &names i)))
+                  (NB.column @"Type" (fn [i] @(Array.unsafe-nth &types i)))])
+               (NB.items (fn [] (Array.length &names))))))

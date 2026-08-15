@@ -303,9 +303,9 @@ deleter of their own.")
              n (Array.length declarations)]
       (for [i 0 n]
         (let [declaration (Array.unsafe-nth declarations i)]
-          (when (and (String.= (CoreTypeDeclaration.name declaration) name)
-                     (Int.> (Array.length (CoreTypeDeclaration.members declaration))
-                            0))
+          (when (and
+              (String.= (CoreTypeDeclaration.name declaration) name)
+              (Int.> (Array.length (CoreTypeDeclaration.members declaration)) 0))
             (set! found true))))
       found))
 
@@ -338,10 +338,12 @@ deleter of their own.")
                   (Box.peek (CoreConstructorDeclaration.result c)))
                 (Maybe.Just rkey)
                   (unless (contains-key? &result &rkey)
-                    (when (or (Int.> @(CoreConstructorDeclaration.tag c) 0)
-                              (and (Int.= 0 (Array.length arguments))
-                                   (and (not (record-declaration? declarations name))
-                                        (not (contains-key? managed &rkey)))))
+                    (when (or
+                        (Int.> @(CoreConstructorDeclaration.tag c) 0)
+                        (and (Int.= 0 (Array.length arguments))
+                             (and
+                               (not (record-declaration? declarations name))
+                               (not (contains-key? managed &rkey)))))
                       (set! result (Array.push-back result rkey))))
                 (Maybe.Nothing) ())
             _ ())))
@@ -2755,8 +2757,7 @@ way specialization keys instances.")
       (for [i 0 n]
         (let [candidate (Array.unsafe-nth candidates i)
               key (CAbi.type-key candidate)]
-          (unless (or (type-key-in? requested &key)
-                      (type-key-in? &result &key))
+          (unless (or (type-key-in? requested &key) (type-key-in? &result &key))
             (set! result (Array.push-back result (MonoType.copy candidate))))))
       result))
 
@@ -2826,7 +2827,8 @@ closed over their copiers as well as their deleters.")
       (for [i 0 n]
         (set! result
               (Array.push-back result
-                               (Specialize.copy-request (Array.unsafe-nth types i)))))
+                               (Specialize.copy-request (Array.unsafe-nth types
+                                                                          i)))))
       result))
 
   (private delete-requests-for)
@@ -2880,8 +2882,9 @@ concrete owned types.")
                                                                          &specialized
                                                                          facts)
                           fresh (new-delete-types &requirements &requested)
-                          fresh-copies (new-types-among &(closure-capture-types &specialized facts)
-                                                        &requested-copies)]
+                          fresh-copies (new-types-among
+                            &(closure-capture-types &specialized facts)
+                            &requested-copies)]
                       (if (and (Int.= 0 (Array.length &fresh))
                                (Int.= 0 (Array.length &fresh-copies)))
                         (do
@@ -2897,7 +2900,8 @@ concrete owned types.")
                           (for [i 0 mc]
                             (set! requested-copies
                                   (Array.push-back requested-copies
-                                                   @(Array.unsafe-nth &fresh-copies i)))))))
+                                                   @(Array.unsafe-nth &fresh-copies
+                                                                      i)))))))
                   (Result.Error error)
                     (do
                       (set! outcome
@@ -3533,10 +3537,10 @@ declaration when a fallback span is available.")
       (match (specialize-closed core inferred &facts &seeds)
         (Result.Success closed)
           (match (if echo
-                   (echo-augment core inferred &facts &seeds &closed)
-                   (Result.Success
-                     (Pair.init (Pair.copy &closed)
-                                (the (Maybe EchoPlan) (Maybe.Nothing)))))
+              (echo-augment core inferred &facts &seeds &closed)
+              (Result.Success
+                (Pair.init (Pair.copy &closed)
+                           (the (Maybe EchoPlan) (Maybe.Nothing)))))
             (Result.Success closed-with-echo)
               (let [final (Pair.a &closed-with-echo)
                     delete-symbols (delete-symbols-for core (Pair.a final))
@@ -3741,8 +3745,9 @@ resolver actually sees, which is not what you wrote.")
   (defn an-expanded-module []
     (Result.from-success
       (MacroExpand.expand-module-with
-        &(Result.from-success (Surface.parse "(defn twice [x] (+ x x))")
-                              (SurfaceModule.init []))
+        &(Result.from-success
+          (Surface.parse "(defn twice [x] (+ x x))")
+          (SurfaceModule.init []))
         &(ExpandConfig.init []))
       (SurfaceModule.init [])))
 
@@ -3752,13 +3757,9 @@ definition in it.")
   (defn an-inferred-module []
     ;; an empty result stands in for a failure the example cannot have: the
     ;; module it infers is a literal one, and it resolves
-    (Result.from-success (Infer.module &(Resolve.a-resolved-module))
-                         (InferredModule.init []
-                                             []
-                                             []
-                                             []
-                                             []
-                                             (TypeSubstitution.init [] [] []))))
+    (Result.from-success
+      (Infer.module &(Resolve.a-resolved-module))
+      (InferredModule.init [] [] [] [] [] (TypeSubstitution.init [] [] []))))
 
   (doc an-inferred-scheme "the type inference found for a definition, written
 the way a diagnostic writes it.")
@@ -3769,7 +3770,9 @@ the way a diagnostic writes it.")
              answer @"(identity was not inferred)"]
       (for [i 0 (Array.length environment)]
         (let [binding (Array.unsafe-nth environment i)]
-          (when (String.= (CoreRef.name (SchemeBinding.reference binding)) "identity")
+          (when (String.=
+              (CoreRef.name (SchemeBinding.reference binding))
+              "identity")
             (set! answer
                   (Type.render
                     (Box.peek (TypeScheme.body (SchemeBinding.scheme binding))))))))
@@ -3780,8 +3783,9 @@ is the compiler's actual output. Standalone, so it uses no standard library:
 `compile-sources` is the entry that takes one.")
   (meta-set! a-compiled-translation-unit "example" true)
   (defn a-compiled-translation-unit []
-    (Result.from-success (CarpCompiler.compile-source "(defn main [] ())")
-                         @"/* this program did not compile */"))
+    (Result.from-success
+      (CarpCompiler.compile-source "(defn main [] ())")
+      @"/* this program did not compile */"))
 
   (doc a-compile-error "what the driver answers when a program does not
 compile: the phase that rejected it, and why.")
