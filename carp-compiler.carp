@@ -2745,6 +2745,21 @@ module, its inference result, and the move/borrow/delete plan. Produced by
   (hidden new-delete-types)
   (private with-closure-delete-requirements)
   (hidden with-closure-delete-requirements)
+  (private new-types-among)
+  (hidden new-types-among)
+  (doc new-types-among "the types in `candidates` not yet requested, keyed the
+way specialization keys instances.")
+  (defn new-types-among [candidates requested]
+    (let-do [result (the (Array MonoType) [])
+             n (Array.length candidates)]
+      (for [i 0 n]
+        (let [candidate (Array.unsafe-nth candidates i)
+              key (CAbi.type-key candidate)]
+          (unless (or (type-key-in? requested &key)
+                      (type-key-in? &result &key))
+            (set! result (Array.push-back result (MonoType.copy candidate))))))
+      result))
+
   (defn new-delete-types [requirements requested]
     (let-do [result (the (Array MonoType) [])
              n (Array.length requirements)]
@@ -2780,6 +2795,40 @@ ensures every generated environment destructor has a concrete symbol.")
                 _ ())))))
       result))
 
+  (private closure-capture-types)
+  (hidden closure-capture-types)
+  (doc closure-capture-types "the owned values that lifted closures capture. A
+capturing closure's environment owns what it captured — the construction site
+copies it in and the environment's deleter frees it — so the module has to be
+closed over their copiers as well as their deleters.")
+  (defn closure-capture-types [specialized facts]
+    (let-do [result (the (Array MonoType) [])
+             lifted (BackendLower.lift-lambdas specialized)
+             closures (Pair.b &lifted)]
+      (for [i 0 (Array.length closures)]
+        (let [captures (ClosureFunction.captures (Array.unsafe-nth closures i))]
+          (for [j 0 (Array.length captures)]
+            (let [capture-type (Box.peek (Pair.b (Array.unsafe-nth captures j)))]
+              (match (OwnershipClassify.classify capture-type facts)
+                (OwnershipClass.Owned)
+                  (let [key (CAbi.type-key capture-type)]
+                    (unless (type-key-in? &result &key)
+                      (set! result
+                            (Array.push-back result (MonoType.copy capture-type)))))
+                _ ())))))
+      result))
+
+  (private copy-requests-for)
+  (hidden copy-requests-for)
+  (defn copy-requests-for [types]
+    (let-do [result (the (Array SpecializationRequest) [])
+             n (Array.length types)]
+      (for [i 0 n]
+        (set! result
+              (Array.push-back result
+                               (Specialize.copy-request (Array.unsafe-nth types i)))))
+      result))
+
   (private delete-requests-for)
   (hidden delete-requests-for)
   (defn delete-requests-for [types]
@@ -2810,6 +2859,7 @@ owns this loop; termination follows from the finite, deduplicated set of
 concrete owned types.")
   (defn specialize-closed [core inferred facts seeds]
     (let-do [requested (the (Array MonoType) [])
+             requested-copies (the (Array MonoType) [])
              outcome (the
                (Result (Pair SpecializationModule OwnershipPlan) CompileError)
                (Result.Error
@@ -2817,7 +2867,10 @@ concrete owned types.")
                                     (String.copy "no fixed point"))))
              done false]
       (while-do (not done)
-        (let [extra (append-requests (delete-requests-for &requested) seeds)]
+        (let [extra (append-requests
+                (append-requests (delete-requests-for &requested)
+                                 &(copy-requests-for &requested-copies))
+                seeds)]
           (match (Specialize.module-with core inferred &extra)
             (Result.Success raw-specialized)
               (let-do [specialized (RefLift.module &raw-specialized)]
@@ -2826,17 +2879,25 @@ concrete owned types.")
                     (let [requirements (with-closure-delete-requirements (OwnershipPlan.requirements &ownership)
                                                                          &specialized
                                                                          facts)
-                          fresh (new-delete-types &requirements &requested)]
-                      (if (Int.= 0 (Array.length &fresh))
+                          fresh (new-delete-types &requirements &requested)
+                          fresh-copies (new-types-among &(closure-capture-types &specialized facts)
+                                                        &requested-copies)]
+                      (if (and (Int.= 0 (Array.length &fresh))
+                               (Int.= 0 (Array.length &fresh-copies)))
                         (do
                           (set! outcome
                                 (Result.Success (Pair.init specialized ownership)))
                           (set! done true))
-                        (let-do [m (Array.length &fresh)]
+                        (let-do [m (Array.length &fresh)
+                                 mc (Array.length &fresh-copies)]
                           (for [i 0 m]
                             (set! requested
                                   (Array.push-back requested
-                                                   @(Array.unsafe-nth &fresh i)))))))
+                                                   @(Array.unsafe-nth &fresh i))))
+                          (for [i 0 mc]
+                            (set! requested-copies
+                                  (Array.push-back requested-copies
+                                                   @(Array.unsafe-nth &fresh-copies i)))))))
                   (Result.Error error)
                     (do
                       (set! outcome

@@ -762,6 +762,20 @@ relies on C block scoping (nested statement expressions shadow it).")
               (Result.Error error) (Result.Error error)))
         (Result.Error error) (Result.Error error)))))
 
+(doc render-env-field-value "one captured value as the environment stores it.
+A managed capture is deep-copied: the environment's deleter frees its fields,
+so storing the capturing scope's own value would free it twice and read it
+after that scope ended. Captures are always plain variable references, so the
+address taken here is always an lvalue.")
+(defn render-env-field-value [value expression]
+  (match-ref expression
+    (SpecializedExpr.Reference _ type _)
+      (match (closure-capture-copier (Box.peek type))
+        (Maybe.Just copier)
+          (String.concat &[(sanitize &copier) @"(&" (String.copy value) @")"])
+        (Maybe.Nothing) (String.copy value))
+    _ (String.copy value)))
+
 (defn render-env-fields [constructors arguments]
   (let-do [rendered (the String (String.copy ""))
            failure (the (Maybe BackendError) (Maybe.Nothing))
@@ -781,7 +795,8 @@ relies on C block scoping (nested statement expressions shadow it).")
                                        &[@".f"
                                          (Int.str i)
                                          @" = "
-                                         (String.copy &value)]))))
+                                         (render-env-field-value &value
+                                                                 (Box.peek (Array.unsafe-nth arguments i)))]))))
             (Result.Error error) (set! failure (Maybe.Just error)))
         (Maybe.Just _) ()))
     (match-ref &failure

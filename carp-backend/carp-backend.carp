@@ -128,6 +128,26 @@ reflift wrapper's binding type, which would mislabel the result.")
       (tail-expression-type (Box.peek annotated))
     _ (Specialize.expression-type expression)))
 
+;; type key -> copier C symbol, seeded per rendered module. A capturing
+;; lambda whose environment outlives the frame must OWN what it captured: the
+;; environment deleter frees its fields, so a field that merely aliases the
+;; capturing scope's value is freed twice, and read after the scope ends. The
+;; construction site deep-copies managed captures with these.
+(def *closure-copy-symbols* (the (Array (Pair String String)) []))
+
+(defn seed-closure-copy-symbols! [symbols]
+  (set! *closure-copy-symbols* (Array.copy symbols)))
+
+(defn closure-capture-copier [capture-type]
+  (let-do [result (the (Maybe String) (Maybe.Nothing))
+           key (CAbi.type-key capture-type)
+           n (Array.length &*closure-copy-symbols*)]
+    (for [i 0 n]
+      (let [entry (Array.unsafe-nth &*closure-copy-symbols* i)]
+        (when (String.= (Pair.a entry) &key)
+          (set! result (Maybe.Just (String.copy (Pair.b entry)))))))
+    result))
+
 (defmodule BackendLower
   (private concrete?)
   (hidden concrete?)
@@ -165,7 +185,8 @@ reflift wrapper's binding type, which would mislabel the result.")
   declarations. It rejects residual type variables rather than delegating them
   to a backend.")
   (defn module [specialized closures delete-symbols copy-symbols]
-    (let-do [declarations (the (Array BackendDeclaration) [])
+    (let-do [_seeded (seed-closure-copy-symbols! copy-symbols)
+             declarations (the (Array BackendDeclaration) [])
              failure (the (Maybe BackendError) (Maybe.Nothing))
              bodies (SpecializationModule.bodies specialized)
              primitives (SpecializationModule.primitives specialized)

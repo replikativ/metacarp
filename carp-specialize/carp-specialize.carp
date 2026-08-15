@@ -2419,6 +2419,23 @@ deleters its ownership plan requires.")
                      (Maybe.Nothing))
       (String.copy "ownership delete")))
 
+  (doc copy-request "builds a specialization request that demands the concrete
+`copy` implementation for `type`, the way `delete-request` demands a deleter.
+Used by the driver to close a module over the copiers a capturing closure
+needs: its environment owns what it captured, so the construction site copies
+it in.")
+  (defn copy-request [type]
+    (SpecializationRequest.init
+      (CallSite.init -1
+                     (PrimitiveRegistry.reference 0 "copy")
+                     (Box.init
+                       (MonoType.Function [(Box.init
+                                             (MonoType.Reference (Box.init (MonoType.copy type))
+                                                                 (MonoLifetime.Static)))]
+                                          (Box.init (MonoType.copy type))))
+                     (Maybe.Nothing))
+      (String.copy "closure capture copy")))
+
   (private name-in?)
   (hidden name-in?)
   (defn name-in? [names name]
