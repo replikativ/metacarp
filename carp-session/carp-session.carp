@@ -376,6 +376,24 @@ traces retained once by `CompilerSession`.")
           (Ref InferredModule)
           (Ref CoreProvenance)]
          (Array SessionDefInfo)))
+  (private rendered-type)
+  (hidden rendered-type)
+  (doc rendered-type "the type to show for a definition. A signature the
+author wrote is shown as they wrote it, type variables and all; without one
+there is nothing to quote, so what inference generalized is shown in letters
+of its own.")
+  (defn rendered-type [core reference scheme]
+    (let-do [result (Type.render-scheme scheme)
+             signatures (CoreModule.signatures core)]
+      (for [i 0 (Array.length signatures)]
+        (let [candidate (Array.unsafe-nth signatures i)]
+          (when (CoreIR.same-ref? (CoreSignature.reference candidate) reference)
+            (set! result
+                  (Type.render-scheme
+                    &(Infer.declaration-scheme
+                      (Box.peek (CoreSignature.signature candidate))))))))
+      result))
+
   (defn definitions-report [input core inferred provenance]
     (let-do [result (the (Array SessionDefInfo) [])
              definitions (Infer.spanned-definition-schemes inferred provenance)]
@@ -385,9 +403,9 @@ traces retained once by `CompilerSession`.")
           (Array.push-back! &result
                             (SessionDefInfo.init (String.copy (CoreRef.name reference))
                                                  (definition-kind core reference)
-                                                 (Type.render
-                                                   (Box.peek
-                                                     (TypeScheme.body (SpannedSchemeBinding.scheme definition))))
+                                                 (rendered-type core
+                                                                reference
+                                                                (SpannedSchemeBinding.scheme definition))
                                                  (SourceInput.copy input)
                                                  (SourceSpan.copy (SpannedSchemeBinding.span definition))))))
       result))
@@ -1226,9 +1244,7 @@ holds what the user has committed since.")
       (for [i 0 (Array.length environment)]
         (let [binding (Array.unsafe-nth environment i)]
           (when (CoreIR.same-ref? (SchemeBinding.reference binding) reference)
-            (set! result
-                  (Type.render
-                    (Box.peek (TypeScheme.body (SchemeBinding.scheme binding))))))))
+            (set! result (Type.render-scheme (SchemeBinding.scheme binding))))))
       result))
 
   (doc complete "returns deterministic prefix matches from the warm visible

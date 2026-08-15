@@ -35,10 +35,18 @@ and results are boxed only to represent recursive type structure.")
    negative-lifetime-indexes (Array Int)
    constructor-bindings (Array (Pair String String))])
 
+(doc TypeScheme "a type together with the variables it is generic in.
+
+`names` runs parallel to `variables`: the name the author gave a variable in
+the signature they wrote, or the empty string for one inference invented. It
+is carried so a rendered type can say `a` where the source said `a`, and is
+never used to decide anything — two variables are the same because their ids
+are, never because their names are.")
 (deftype TypeScheme
   [variables (Array Int)
    lifetime-variables (Array Int)
-   body (Box MonoType)])
+   body (Box MonoType)
+   names (Array String)])
 
 (deftype TypeError [message String])
 
@@ -1386,6 +1394,70 @@ lifetime identities. Specialization and ABI layout use this relation.")
 specialization symbols.")
   (defn name [type] (name-internal type))
 
+  ;; the variables of the type being rendered, in the order they first
+  ;; appear. A render names them from this list, so the same variable reads
+  ;; the same way everywhere in one type and no two variables share a name.
+  (def *render-names* (the (Array Int) []))
+
+  ;; the name the source gave each of those variables, when a scheme was
+  ;; rendered and knew them. Empty means the reader gets a letter.
+  (def *render-labels* (the (Array String) []))
+
+  (private variable-label)
+  (hidden variable-label)
+  (doc variable-label "the name a variable is rendered under: `a` for the
+first distinct one, `b` for the second, and after `z` a letter with a number
+after it. A variable the naming pass never saw keeps its identity rather than
+borrowing a name, which is what makes a stray one obvious.")
+  (defn variable-label [names variable]
+    (let-do [found -1
+             n (Array.length names)]
+      (for [i 0 n]
+        (when (Int.= @(Array.unsafe-nth names i) variable)
+          (when (Int.< found 0) (set! found i))))
+      (if (Int.< found 0)
+        (String.append "v" &(Int.str variable))
+        (let [given (if (Int.< found (Array.length &*render-labels*))
+                @(Array.unsafe-nth &*render-labels* found)
+                @"")]
+          (if (String.empty? &given)
+            (let [letter (String.from-chars
+                    &[(Char.from-int (Int.+ 97 (Int.mod found 26)))])
+                  cycle (Int./ found 26)]
+              (if (Int.= 0 cycle)
+                letter
+                (String.append &letter &(Int.str cycle))))
+            given)))))
+
+  (private collect-variables!)
+  (hidden collect-variables!)
+  (defn collect-variables! [type names]
+    (match-ref type
+      (MonoType.Variable variable)
+        (let-do [seen false
+                 n (Array.length names)]
+          (for [i 0 n]
+            (when (Int.= @(Array.unsafe-nth names i) @variable) (set! seen true)))
+          (unless seen (Array.push-back! names @variable)))
+      (MonoType.Named _ arguments)
+        (for [i 0 (Array.length arguments)]
+          (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
+      (MonoType.Reference inner _) (collect-variables! (Box.peek inner) names)
+      (MonoType.Function arguments result)
+        (do
+          (for [i 0 (Array.length arguments)]
+            (collect-variables! (Box.peek (Array.unsafe-nth arguments i)) names))
+          (collect-variables! (Box.peek result) names))
+      _ ()))
+
+  (private name-variables!)
+  (hidden name-variables!)
+  (defn name-variables! [type]
+    (let-do [names (the (Array Int) [])]
+      (collect-variables! type &names)
+      (set! *render-names* names)
+      (set! *render-labels* (the (Array String) []))))
+
   (private render-arguments)
   (hidden render-arguments)
   (private render-internal)
@@ -1401,7 +1473,7 @@ specialization symbols.")
 
   (defn render-internal [type]
     (match-ref type
-      (MonoType.Variable variable) (String.append "v" &(Int.str @variable))
+      (MonoType.Variable variable) (variable-label &*render-names* @variable)
       (MonoType.Integer) @"Int"
       (MonoType.String) @"String"
       (MonoType.Boolean) @"Bool"
@@ -1427,8 +1499,35 @@ specialization symbols.")
 
   (doc render "renders a source-shaped type for diagnostics and editor APIs.
 Unlike `name`, this is intentionally human-readable and must not be used as an
-ABI or specialization key.")
-  (defn render [type] (render-internal type))
+ABI or specialization key.
+
+Inference variables are named per rendered type, in the order they first
+appear: `(Fn [a] a)` rather than `(Fn [v32085] v32085)`. The numbers are
+allocator counters, which say nothing to a reader and differ between two runs
+of the same program; what a reader needs is which variables are the same one.")
+  (defn render [type]
+    (let-do [_named (name-variables! type)] (render-internal type)))
+
+  (doc render-scheme "renders a scheme's type under the names its signature
+used. A variable the author named reads as they wrote it; one inference
+invented reads as a letter, so the two are told apart on sight.")
+  (defn render-scheme [scheme]
+    (let-do [type (Box.peek (TypeScheme.body scheme))
+             _named (name-variables! type)
+             labels (the (Array String) [])
+             variables (TypeScheme.variables scheme)
+             names (TypeScheme.names scheme)]
+      (for [i 0 (Array.length &*render-names*)]
+        (let-do [variable @(Array.unsafe-nth &*render-names* i)
+                 label @""]
+          (for [j 0 (Array.length variables)]
+            (when (and
+                (Int.= @(Array.unsafe-nth variables j) variable)
+                (Int.< j (Array.length names)))
+              (set! label @(Array.unsafe-nth names j))))
+          (Array.push-back! &labels label)))
+      (set! *render-labels* labels)
+      (render-internal type)))
 
   ;; Examples: definitions that say they are examples. Each answers a real
   ;; artifact of this phase, so the browser can attach it to the type it

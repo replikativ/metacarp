@@ -257,8 +257,31 @@ of its source definition.")
                 (MonoType.copy (Box.peek (ConvertedType.type &converted-result)))))
             @(ConvertedType.variables &converted-result)))))
 
-  (private declaration-scheme)
-  (hidden declaration-scheme)
+  (doc declaration-scheme "the scheme a written signature declares, with the
+names the author used. A tool that wants to show a type the way it was
+written asks for this one; what inference generalized says the same thing in
+its own variables.")
+  (private declaration-names)
+  (hidden declaration-names)
+  (doc declaration-names "the source name of every variable a declaration
+quantifies. A declared variable is numbered by where it appears in the
+signature — `a` is -1, `b` is -2 — so its name is that position in the list
+the conversion collected; anything else was invented by inference and has no
+name to give.")
+  (defn declaration-names [quantified variables]
+    (let-do [names (the (Array String) [])
+             n (Array.length quantified)]
+      (for [i 0 n]
+        (let [variable @(Array.unsafe-nth quantified i)
+              index (Int.- -1 variable)]
+          (if (and (Int.< variable 0)
+                   (and (Int.>= index 0) (Int.< index (Array.length variables))))
+            (Array.push-back! &names
+                              (String.suffix (Array.unsafe-nth variables index)
+                                             5))
+            (Array.push-back! &names @""))))
+      names))
+
   (defn declaration-scheme [signature]
     (let-do [variables (the (Array String) [])
              converted (convert-declaration-type signature &variables)
@@ -269,7 +292,9 @@ of its source definition.")
                          (Box.peek (ConvertedType.type &converted)))
                        (Box.init
                          (MonoType.copy
-                           (Box.peek (ConvertedType.type &converted)))))))
+                           (Box.peek (ConvertedType.type &converted))))
+                       (declaration-names &quantified
+                                          (ConvertedType.variables &converted)))))
 
   (private binding-for)
   (hidden binding-for)
@@ -470,13 +495,15 @@ of its source definition.")
             (set! quantified (Type.append-variable &quantified variable)))))
       (TypeScheme.init quantified
                        (Type.free-lifetimes type)
-                       (Box.init (MonoType.copy type)))))
+                       (Box.init (MonoType.copy type))
+                       (the (Array String) []))))
 
   (defn generalize-local [environment type]
     (let-do [scheme (generalize environment type)]
       (TypeScheme.init @(TypeScheme.variables &scheme)
                        []
-                       @(TypeScheme.body &scheme))))
+                       @(TypeScheme.body &scheme)
+                       @(TypeScheme.names &scheme))))
 
   (private instantiate)
   (hidden instantiate)
@@ -778,7 +805,8 @@ monomorphic sharing the array relies on.")
             placeholder (MonoType.copy (Box.peek (FreshType.type &fresh-result)))
             pre-scheme (TypeScheme.init []
                                         []
-                                        (Box.init (MonoType.copy &placeholder)))
+                                        (Box.init (MonoType.copy &placeholder))
+                                        (the (Array String) []))
             pre-env (extend-environment environment reference &pre-scheme)
             value-state (InferState.copy (FreshType.state &fresh-result))]
         (match (infer-expression &pre-env (Box.peek value) &value-state)
@@ -798,7 +826,8 @@ monomorphic sharing the array relies on.")
                          ;; unsolved for specialization.
                          scheme (TypeScheme.init []
                                                  []
-                                                 (Box.init (MonoType.copy &value-type)))
+                                                 (Box.init (MonoType.copy &value-type))
+                                                 (the (Array String) []))
                          extended (extend-environment environment
                                                       reference
                                                       &scheme)
@@ -826,7 +855,8 @@ monomorphic sharing the array relies on.")
                        (generalize-local environment &value-type)
                        (TypeScheme.init []
                                         []
-                                        (Box.init (MonoType.copy &value-type))))
+                                        (Box.init (MonoType.copy &value-type))
+                                        (the (Array String) [])))
                      extended (extend-environment environment reference &scheme)
                      body-state (InferState.copy
                        (InferredExpression.state &inferred-value))]
@@ -999,7 +1029,8 @@ monomorphic sharing the array relies on.")
                                              []
                                              (Box.init
                                                (MonoType.copy
-                                                 (Box.peek (FreshType.type &fresh-result)))))]
+                                                 (Box.peek (FreshType.type &fresh-result))))
+                                             (the (Array String) []))]
               (record-binding-type! (FreshType.state &fresh-result)
                                     (Pair.a pair)
                                     binding
@@ -1297,7 +1328,8 @@ monomorphic sharing the array relies on.")
                                              []
                                              (Box.init
                                                (MonoType.copy
-                                                 (Box.peek (FreshType.type &fresh-result)))))]
+                                                 (Box.peek (FreshType.type &fresh-result))))
+                                             (the (Array String) []))]
               (record-binding-type! (FreshType.state &fresh-result)
                                     (Pair.a pair)
                                     parameter
@@ -1537,7 +1569,8 @@ monomorphic sharing the array relies on.")
                                              []
                                              (Box.init
                                                (MonoType.copy
-                                                 (Box.peek (FreshType.type &fresh-result)))))]
+                                                 (Box.peek (FreshType.type &fresh-result))))
+                                             (the (Array String) []))]
               (record-binding-type! (FreshType.state &fresh-result)
                                     (Pair.a pair)
                                     parameter
@@ -1623,7 +1656,10 @@ monomorphic sharing the array relies on.")
                   (let [fresh-result (fresh (Pair.b pair))
                         placeholder (MonoType.copy
                           (Box.peek (FreshType.type &fresh-result)))
-                        scheme (TypeScheme.init [] [] (Box.init placeholder))]
+                        scheme (TypeScheme.init []
+                                                []
+                                                (Box.init placeholder)
+                                                (the (Array String) []))]
                     (set! result
                           (Result.Success
                             (Pair.init
@@ -1708,7 +1744,8 @@ monomorphic sharing the array relies on.")
                                                 []
                                                 (Box.init
                                                   (MonoType.copy
-                                                    (Box.peek (FreshType.type &fresh-result)))))]
+                                                    (Box.peek (FreshType.type &fresh-result))))
+                                                (the (Array String) []))]
                     (set! result
                           (Result.Success
                             (Pair.init
