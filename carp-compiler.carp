@@ -21,6 +21,21 @@ of the retired id-range convention.")
 (def *fallback-str-ids* (the (Array Int) []))
 (def *derive-preserve-expression-ids* false)
 
+(doc *want-source-map* "whether this compilation should be able to say which
+Carp line each piece of C came from. A debug build wants it; every other build
+pays nothing for it.")
+(def *want-source-map* false)
+;; the map itself, filled in by resolution and read at rendering time
+(def *source-map* (CoreProvenance.init [] [] []))
+;; the files this compilation read, kept only while a source map is wanted:
+;; turning a byte offset into a line number needs the text it points into
+(def *source-map-files* (the (Array String) []))
+(def *source-map-texts* (the (Array String) []))
+;; the identities in the map are drawn from here, and the derivation passes
+;; keep drawing from the same place, so a node a phase generated cannot be
+;; handed an identity a written one already has
+(def *source-map-allocator* (IdAllocator.init [0]))
+
 (defmodule Derive
   (private finish-indexing)
   (hidden finish-indexing)
@@ -3424,7 +3439,31 @@ REPL results.")
   ;; full-module snapshot until compile-module-full returns.
   (private resolve-owned)
   (hidden resolve-owned)
-  (defn resolve-owned [expanded] (Resolve.module &expanded))
+  (doc resolve-owned "resolves the expanded module, collecting a source map
+when a caller asked to be able to debug what comes out.
+
+Resolving with provenance costs an entry per node and hands out node IDs from
+a monotonic allocator rather than the historical owner-relative ones, which is
+why it is not simply always on.")
+  (defn resolve-owned [expanded]
+    (if *want-source-map*
+      (match (let-do [_ignored-reset (Array.aset!
+                        (IdAllocator.cell &*source-map-allocator*)
+                        0
+                        0)]
+          (Resolve.module-with-provenance
+            &(SourcedSurfaceModule.init (SourceInput.init @"<program>" @"")
+                                        expanded)
+            &*source-map-allocator*))
+        (Result.Success provenanced)
+          (do
+            (set! *source-map*
+                  (CoreProvenance.copy
+                    (ProvenancedCoreModule.provenance &provenanced)))
+            (Result.Success
+              (CoreModule.copy (ProvenancedCoreModule.core &provenanced))))
+        (Result.Error error) (Result.Error error))
+      (Resolve.module &expanded)))
 
   (private typedefs-owned)
   (hidden typedefs-owned)
@@ -3473,12 +3512,35 @@ REPL results.")
 
   (private derive-core-owned)
   (hidden derive-core-owned)
+  (doc derive-core-owned "runs every derivation pass over a resolved module.
+
+A build that wants a source map keeps the identities resolution handed out
+through the passes, and then gives the nodes the passes generated identities
+from the same allocator. Without that the derived module is renumbered
+owner-locally, and the map describes a program that no longer exists.")
   (defn derive-core-owned [core]
-    (close-generics-owned
-      (strs-owned
-        (deletes-owned
-          (copies-owned
-            (pair-refs-owned (accessors-owned (typedefs-owned core))))))))
+    (if *want-source-map*
+      (let-do [_ignored-preserve (set! *derive-preserve-expression-ids* true)
+               derived (close-generics-owned
+                 (strs-owned
+                   (deletes-owned
+                     (copies-owned
+                       (pair-refs-owned (accessors-owned (typedefs-owned core)))))))
+               _ignored-restore (set! *derive-preserve-expression-ids* false)
+               identified (CoreIR.identify-generated &derived
+                                                     &*source-map*
+                                                     &*source-map-allocator*
+                                                     &(the (Maybe SourceSpan)
+                                                           (Maybe.Nothing)))]
+        (set! *source-map*
+              (CoreProvenance.copy
+                (ProvenancedCoreModule.provenance &identified)))
+        (CoreModule.copy (ProvenancedCoreModule.core &identified)))
+      (close-generics-owned
+        (strs-owned
+          (deletes-owned
+            (copies-owned
+              (pair-refs-owned (accessors-owned (typedefs-owned core)))))))))
 
   (doc derive-module-for-inference "validates and derives a resolved module
 for warm tooling that needs the same accessor, copy, delete, string, and
@@ -3521,11 +3583,110 @@ declaration when a fallback span is available.")
                                                  &copy-symbols
                                                  echo-plan)))
 
+  (private line-starts)
+  (hidden line-starts)
+  (doc line-starts "the byte offset each line of a text begins at. Built once
+per file so turning thousands of spans into line numbers is a search rather
+than a scan of the whole file each time.")
+  (defn line-starts [text]
+    (let-do [starts (the (Array Int) [0])
+             n (String.length text)]
+      (for [i 0 n]
+        (when (= (String.char-at text i) \newline)
+          (Array.push-back! &starts (Int.inc i))))
+      starts))
+
+  (private line-at)
+  (hidden line-at)
+  (doc line-at "which line an offset falls on, counting from one.")
+  (defn line-at [starts offset]
+    (let-do [low 0
+             high (Int.dec (Array.length starts))]
+      (while (Int.< low high)
+        (let [middle (Int./ (Int.inc (Int.+ low high)) 2)]
+          (if (Int.<= @(Array.unsafe-nth starts middle) offset)
+            (set! low middle)
+            (set! high (Int.dec middle)))))
+      (Int.inc low)))
+
+  (private text-of-file)
+  (hidden text-of-file)
+  (defn text-of-file [file]
+    (let-do [found (the (Maybe String) (Maybe.Nothing))
+             n (Array.length &*source-map-files*)]
+      (for [i 0 n]
+        (when (String.= (Array.unsafe-nth &*source-map-files* i) file)
+          (set! found
+                (Maybe.Just
+                  (String.copy (Array.unsafe-nth &*source-map-texts* i))))))
+      found))
+
+  (private install-source-map!)
+  (hidden install-source-map!)
+  (doc install-source-map! "turns the resolver's spans into the file and line
+each expression was written at, and hands them to the backend.
+
+A span is a byte range into a file; a debugger wants a line, so each file is
+indexed once and every span into it is answered by search. Spans in files this
+compilation did not read — code a phase made up, or a string parsed without a
+name — are left out, and the C they produce keeps the line of whatever form it
+came from.")
+  (defn install-source-map! []
+    (let-do [nodes (CoreProvenance.nodes &*source-map*)
+             count (Array.length nodes)
+             highest -1]
+      (for [i 0 count]
+        (let [id @(NodeProvenance.id (Array.unsafe-nth nodes i))]
+          (when (Int.> id highest) (set! highest id))))
+      (let-do [size (Int.inc (Int.max highest 0))
+               files (Array.replicate size &@"")
+               lines (Array.replicate size &-1)
+               ;; one index per file, built the first time a span points into it
+               indexed-names (the (Array String) [])
+               indexed-starts (the (Array (Array Int)) [])]
+        (for [i 0 count]
+          (let [node (Array.unsafe-nth nodes i)
+                span (NodeProvenance.span node)
+                id @(NodeProvenance.id node)
+                file (SourceSpan.source-id span)]
+            (when (and (Int.>= id 0) (Int.< id size))
+              (let-do [slot -1
+                       n (Array.length &indexed-names)]
+                (for [j 0 n]
+                  (when (String.= (Array.unsafe-nth &indexed-names j) file)
+                    (set! slot j)))
+                (when (Int.< slot 0)
+                  (match (text-of-file file)
+                    (Maybe.Just text)
+                      (do
+                        (Array.push-back! &indexed-names (String.copy file))
+                        (Array.push-back! &indexed-starts (line-starts &text))
+                        (set! slot (Int.dec (Array.length &indexed-names))))
+                    (Maybe.Nothing) ()))
+                (when-do (Int.>= slot 0)
+                  (Array.aset! &files id (String.copy file))
+                  (Array.aset! &lines
+                               id
+                               (line-at (Array.unsafe-nth &indexed-starts slot)
+                                        @(SourceSpan.start span))))))))
+        (match (IO.getenv "CARP_DEBUG_SOURCE_MAP")
+          (Maybe.Just _)
+            (IO.errorln
+              &(fmt
+                "source map: %d nodes, ids up to %d, %d files indexed"
+                count
+                highest
+                (Array.length &indexed-names)))
+          (Maybe.Nothing) ())
+        (LineMap.install! &files &lines))))
+
   (private render-owned)
   (hidden render-owned)
   (defn render-owned [backend]
-    (let-do [_ignored (phase-mark! "phase: lowered")]
-      (CBackend.executable-translation-unit &backend)))
+    (let-do [_ignored (phase-mark! "phase: lowered")
+             _ignored-map (when *want-source-map* (install-source-map!))
+             rendered (CBackend.executable-translation-unit &backend)]
+      rendered))
 
   (private compile-inferred-module-with)
   (hidden compile-inferred-module-with)
@@ -3798,15 +3959,27 @@ compile: the phase that rejected it, and why.")
   (doc compile-sources-with "loads a root from an in-memory source registry,
 then compiles the resulting deterministic module stream.")
   (defn compile-sources-with [sources root config]
-    (match (ModuleLoader.load sources root)
-      (Result.Success module) (compile-module-with &module config)
-      (Result.Error error)
-        (Result.Error
-          (CompileError.init (String.copy "load")
-                             (String.concat
-                               &[(String.copy (ModuleError.path &error))
-                                 @": "
-                                 (String.copy (ModuleError.message &error))])))))
+    (do
+      (when-do *want-source-map*
+        ;; the texts outlive the loader here: a span is a byte offset, and only
+        ;; the file it points into can turn that into a line
+        (set! *source-map-files* [])
+        (set! *source-map-texts* [])
+        (for [i 0 (Array.length sources)]
+          (let-do [source (Array.unsafe-nth sources i)]
+            (Array.push-back! &*source-map-files*
+                              (String.copy (ModuleSource.file source)))
+            (Array.push-back! &*source-map-texts*
+                              (String.copy (ModuleSource.text source))))))
+      (match (ModuleLoader.load sources root)
+        (Result.Success module) (compile-module-with &module config)
+        (Result.Error error)
+          (Result.Error
+            (CompileError.init (String.copy "load")
+                               (String.concat
+                                 &[(String.copy (ModuleError.path &error))
+                                   @": "
+                                   (String.copy (ModuleError.message &error))]))))))
 
   (doc compile-sources "loads and compiles an in-memory source registry with
 no implicit prelude modules.")
