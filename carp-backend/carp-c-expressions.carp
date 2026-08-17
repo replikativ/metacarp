@@ -932,22 +932,25 @@ than per statement, and generated code with no place of its own keeps the
 claim of the form it came out of — which is the form a reader would point at
 anyway.")
 (defn append-line-directive! [buffer id]
-  (when *emit-line-directives*
+  (when-do *emit-line-directives*
     (let [line (LineMap.line-of id)]
-      (when (Int.> line 0)
-        (let [file (LineMap.file-of id)]
-          (unless-do (and (Int.= line *line-last-line*)
-                          (String.= &file &*line-last-file*))
-            ;; a directive owns the line it stands on, so it starts one
-            (StringBuf.append-str buffer "
+      (if (Int.> line 0)
+        (let-do [file (LineMap.file-of id)]
+          ;; a directive owns the line it stands on, so it starts one
+          (StringBuf.append-str buffer "
 #line ")
-            (StringBuf.append-str buffer &(Int.str line))
-            (StringBuf.append-str buffer " \"")
-            (StringBuf.append-str buffer &file)
-            (StringBuf.append-str buffer "\"
+          (StringBuf.append-str buffer &(Int.str line))
+          (StringBuf.append-str buffer " \"")
+          (StringBuf.append-str buffer &file)
+          (StringBuf.append-str buffer "\"
 ")
-            (set! *line-last-line* line)
-            (set! *line-last-file* file)))))))
+          (set! *line-last-line* line)
+          (set! *line-last-file* file))
+        ;; nowhere to point: put the file back on itself. A directive claims
+        ;; every line after it, counting up, so code with no place of its own
+        ;; would otherwise be walked through as lines of a Carp file that stop
+        ;; existing a few lines in
+        (LineMap.mark-reset! buffer)))))
 
 (defn array-element-type [array-type]
   (let [storage-type (deref-type array-type)]

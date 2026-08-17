@@ -2532,13 +2532,45 @@ before ownership so managed temporaries are freed correctly.")
                  atom (extract expr &cell counter)]
           (wrap &cell atom counter))))
 
+  (private module-ceiling)
+  (hidden module-ceiling)
+  (doc module-ceiling "the largest expression id anywhere in the module.
+
+It walks the module in a function of its own rather than inside `module`,
+because two walks of the same array in one function are given the same name
+for that array''s data, and the second declaration of that name does not
+compile. That is a fault worth fixing where it lives; a caller can avoid
+tripping it by not asking one function to walk one array twice.")
+  (defn module-ceiling [bodies roots]
+    (let-do [ceiling 0]
+      (for [i 0 (Array.length bodies)]
+        (set! ceiling
+              (Int.max ceiling
+                       (max-eid
+                         (Box.peek
+                           (SpecializedBody.body (Array.unsafe-nth bodies i)))))))
+      (for [i 0 (Array.length roots)]
+        (set! ceiling
+              (Int.max ceiling (max-eid (Box.peek (Array.unsafe-nth roots i))))))
+      ceiling))
+
   (private lift-body)
   (hidden lift-body)
+  (doc lift-body "lifts one body's borrows, allocating ids for the temporaries
+it introduces.
+
+The ids start above this body's own maximum, which is enough for a validator
+that looks at one body at a time. It is not enough for a source map: that maps
+an id to where it was written, across the whole module, and an id invented
+here would otherwise name a line from some other definition. A build that
+wants a map says so, and then the ids start above every id in the module.")
   (defn lift-body [b counter]
     (let-do [_ignored (Array.aset! counter
                                    1
-                                   (Int.inc
-                                     (max-eid (Box.peek (SpecializedBody.body b)))))]
+                                   (if *want-source-map*
+                                     @(Array.unsafe-nth counter 2)
+                                     (Int.inc
+                                       (max-eid (Box.peek (SpecializedBody.body b))))))]
       (SpecializedBody.init @(SpecializedBody.specialization b)
                             (Array.copy (SpecializedBody.parameters b))
                             (Box.init
@@ -2549,11 +2581,15 @@ before ownership so managed temporaries are freed correctly.")
   (doc module "rewrites every function body and root of a specialized module so
 borrows of non-lvalues are lifted to scope-lived temporaries.")
   (defn module [m]
-    (let-do [counter (the (Array Int) [(Int.dec (Specialize.min-local-id m)) 0])
+    (let-do [counter (the (Array Int)
+                          [(Int.dec (Specialize.min-local-id m)) 0 0])
              new-bodies (the (Array SpecializedBody) [])
              new-roots (the (Array (Box SpecializedExpr)) [])
              bodies (SpecializationModule.bodies m)
              roots (SpecializationModule.roots m)]
+      ;; slot 2 is the module-wide ceiling: an id above everything written
+      ;; anywhere in the module, so a temporary cannot be mistaken for a form
+      (Array.aset! &counter 2 (Int.inc (module-ceiling bodies roots)))
       (for [i 0 (Array.length bodies)]
         (Array.push-back! &new-bodies
                           (lift-body (Array.unsafe-nth bodies i) &counter)))
@@ -3679,6 +3715,33 @@ came from.")
                 (Array.length &indexed-names)))
           (Maybe.Nothing) ())
         (LineMap.install! &files &lines))))
+
+  (doc resolve-line-resets "turns the marks the backend left at function
+boundaries into directives naming the generated file itself.
+
+A `#line` directive claims every line after it until the next one, so code
+with no Carp of its own — a function the compiler generated, the C entry
+point — would otherwise be attributed to whatever was rendered before it.
+Each mark stands on a line of the output, and a directive naming the line
+after it puts the file back on itself. The count is only possible here,
+because only here is the whole unit written.")
+  (defn resolve-line-resets [rendered path]
+    (if (String.empty? path)
+      (String.copy rendered)
+      (let-do [lines (String.split-by rendered &[\newline])
+               out (the (Array String) [])
+               mark (LineMap.reset-mark)
+               n (Array.length &lines)]
+        (for [i 0 n]
+          (let [line (Array.unsafe-nth &lines i)]
+            (Array.push-back! &out
+                              (if (String.= line &mark)
+                                ;; the directive names the line after the one
+                                ;; it stands on, which is where this one is
+                                (fmt "#line %d \"%s\"" (Int.+ i 2) path)
+                                (String.copy line)))))
+        (String.join "
+" &out))))
 
   (private render-owned)
   (hidden render-owned)

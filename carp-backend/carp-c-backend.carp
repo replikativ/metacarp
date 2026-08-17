@@ -46,6 +46,24 @@ than borrowing a line from whatever it was derived from.")
       @(Array.unsafe-nth &*line-node-lines* id)
       -1))
 
+  (doc reset-mark "the text a boundary is marked with, and what a later pass
+looks for. It is a comment so a translation unit carrying one still compiles
+even if nothing resolves it.")
+  (defn reset-mark [] @"/*carp-line-reset*/")
+
+  (doc mark-reset! "marks a place that belongs to the generated C rather than
+to any Carp: the top of a function, where the previous function's last line
+would otherwise be inherited by whatever this one turns out to be.
+
+Rendering cannot write the directive itself. A directive has to name the line
+it stands on, and the line is only known once the whole unit has been built —
+so this leaves a mark, and `Carp.resolve-line-resets` turns it into a
+directive once there is an output to count lines in.")
+  (defn mark-reset! [buffer]
+    (when-do *emit-line-directives* (StringBuf.append-str buffer "
+") (StringBuf.append-str buffer &(reset-mark)) (StringBuf.append-str buffer "
+") (set! *line-last-line* -1) (set! *line-last-file* @"")))
+
   (doc file-of "the file an expression was written in.")
   (defn file-of [id]
     (if (and (Int.>= id 0) (Int.< id (Array.length &*line-node-files*)))

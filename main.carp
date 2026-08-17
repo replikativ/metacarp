@@ -810,7 +810,12 @@
                ;; a debug build keeps its C, and keeps it where the binary says
                ;; it is; every other build compiles a temporary and removes it
                temp-c (if debug (debug-c-path &binary) (temp-c-path))
-               built (and (write-temp-c c &temp-c)
+               ;; the marks the backend left can only become directives once
+               ;; the file they will live in is known, which is here
+               emitted (if debug
+                 (CarpCompiler.resolve-line-resets c &temp-c)
+                 (String.copy c))
+               built (and (write-temp-c &emitted &temp-c)
                           (clang-build dir
                                        &binary
                                        &temp-c
