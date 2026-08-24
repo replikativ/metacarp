@@ -206,6 +206,19 @@ answer") (Result.Success module)
             (Int.= 1 (Array.length (CoreModule.expressions &module)))))) (Result.Error _)
       false))
 
+(defn resolves-register-type-c-name-and-fields? []
+  (match (resolve-source "(register-type Particle \"carpaccio_particle\" [x Double, n Int])
+(defn set-x! [particle] (Particle.set-x! particle 1.0))")
+    (Result.Success module)
+      (let [declaration (Array.unsafe-nth (CoreModule.type-declarations &module) 0)]
+        (and
+          (match-ref (CoreTypeDeclaration.representation declaration)
+            (Maybe.Just representation) (= representation "carpaccio_particle")
+            (Maybe.Nothing) false)
+          (and (Int.= 2 (Array.length (CoreTypeDeclaration.members declaration)))
+               (Int.= 1 (Array.length (CoreModule.functions &module))))))
+    (Result.Error _) false))
+
 (defn resolves-signature-metadata? []
   (match (resolve-source
       "(defmodule UnitRef (meta-set! = \"sig\" (Fn [&Unit &Unit] Bool)) (defn = [a b] true))")
@@ -309,13 +322,47 @@ answer") (Result.Success module)
                found false]
         (for [i 0 (Array.length sources)]
           (match-ref (CoreBuiltinSource.payload (Array.unsafe-nth sources i))
-            (CoreBuiltinPayload.External external-name)
+            (CoreBuiltinPayload.External external-name _)
               (match-ref external-name
                 (Maybe.Just name)
                   (when (= name "external_inc") (set! found true))
                 (Maybe.Nothing) ())
             _ ()))
         found) (Result.Error _) false))
+
+(defn resolves-register-foreign-contract? []
+  (match (resolve-source "(register mutate (Fn [(Ref Int) Int] ()) \"mutate\" [unique copy])
+(mutate &1 2)")
+    (Result.Success module)
+      (let-do [found false
+               sources (CoreModule.builtin-sources &module)]
+        (for [i 0 (Array.length sources)]
+          (match-ref (CoreBuiltinSource.payload (Array.unsafe-nth sources i))
+            (CoreBuiltinPayload.External _ contract)
+              (match-ref contract
+                (Maybe.Just modes)
+                  (when (and (Int.= 2 (Array.length modes))
+                             (and
+                               (match-ref (Array.unsafe-nth modes 0)
+                                 (CoreForeignParameterMode.Unique) true
+                                 _ false)
+                               (match-ref (Array.unsafe-nth modes 1)
+                                 (CoreForeignParameterMode.Copy) true
+                                 _ false)))
+                    (set! found true))
+                (Maybe.Nothing) ())
+            _ ()))
+        found)
+    (Result.Error _) false))
+
+(defn rejects-invalid-register-foreign-contracts? []
+  (and
+    (Result.error?
+      &(resolve-source
+         "(register bad-arity (Fn [(Ref Int)] ()) \"bad\" [unique copy])"))
+    (Result.error?
+      &(resolve-source
+         "(register bad-mode (Fn [Int] ()) \"bad\" [unique])"))))
 
 (defn resolves-registers-under-top-level-if? [] (match (resolve-source "(if true
   (do (Unsafe.preproc (Unsafe.emit-c \"a\")) (register addr (Fn [] ())))
@@ -492,6 +539,10 @@ answer") (Result.Success module)
     "resolver accepts def, sig, and register-type")
 
   (assert-true t
+    (resolves-register-type-c-name-and-fields?)
+    "register-type retains an external C name together with its fields")
+
+  (assert-true t
     (resolves-signature-metadata?)
     "resolver reads signatures from expanded metadata")
 
@@ -522,6 +573,14 @@ answer") (Result.Success module)
   (assert-true t
     (resolves-register-external-name?)
     "resolver retains register external C names")
+
+  (assert-true t
+    (resolves-register-foreign-contract?)
+    "resolver retains explicit foreign parameter modes")
+
+  (assert-true t
+    (rejects-invalid-register-foreign-contracts?)
+    "resolver rejects foreign contracts with mismatched arity or parameter kinds")
 
   (assert-true t
     (resolves-registers-under-top-level-if?)

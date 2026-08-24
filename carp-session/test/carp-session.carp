@@ -365,6 +365,28 @@
         ok)
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
+(defn emit-library-omits-process-entry? []
+  (match (make-session)
+    (Result.Success session)
+      (let [cell (SourceInput.init (String.copy "cell:library")
+                                   (String.copy
+                                     "(sig exported-id (Fn [Int] Int))
+(defn exported-id [x] (warm-id x))"))]
+        (match (Session.emit-library &session &cell &[(String.copy "exported-id")])
+          (Result.Success artifact)
+            (let [c (LibraryArtifact.c &artifact)
+                  ownership (LibraryArtifact.ownership &artifact)]
+              (and (String.contains-string? c "exported")
+                   (and (not (String.contains-string?
+                               c
+                               "int main(int argc, char** argv)"))
+                        (and (Int.= 1 (Array.length ownership))
+                             (String.= (OwnershipReport.name
+                                         (Array.unsafe-nth ownership 0))
+                                       "exported-id")))))
+          (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn ownership-query-tracks-replacement-and-spans? []
   (match (make-session)
     (Result.Success session)
@@ -938,6 +960,9 @@
   (assert-true t
     (emit-cell-is-deterministic-and-non-mutating?)
     "cell emission is deterministic and leaves committed session state untouched")
+  (assert-true t
+    (emit-library-omits-process-entry?)
+    "library cell emission retains compiled roots but omits the process entry")
   (assert-true t
     (ownership-query-tracks-replacement-and-spans?)
     "ownership queries track replacement and return caller-relative spans")

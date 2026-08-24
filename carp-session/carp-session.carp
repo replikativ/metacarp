@@ -50,7 +50,14 @@
 (deftype OwnershipReport
   [name String
    scheme String
-   actions (Array SpannedOwnershipAction)])
+   actions (Array SpannedOwnershipAction)
+   accesses (Array SpannedOwnershipAccess)
+   summaries (Array OwnershipFunctionSummary)
+   foreign-contracts (Array OwnershipForeignContract)])
+
+(deftype LibraryArtifact
+  [c String
+   ownership (Array OwnershipReport)])
 
 (deftype SessionDocument [name String
                           documentation String
@@ -107,22 +114,23 @@ committed definition makes a dormant polymorphic call reachable.")
              calls (the (Array CallSite) [])
              node-types (the (Array InferredNodeType) [])
              binding-types (the (Array InferredBindingType) [])
-             substitution (InferredModule.substitution module)]
+             substitution (InferredModule.substitution module)
+             solver (Type.solver-from-substitution substitution)]
       (for [i 0 (Array.length (InferredModule.expression-types module))]
         (Array.push-back! &expression-types
                           (Box.init
-                            (Type.apply substitution
-                                        (Box.peek
-                                          (Array.unsafe-nth (InferredModule.expression-types module)
-                                                            i))))))
+                            (Type.solver-apply &solver
+                                               (Box.peek
+                                                 (Array.unsafe-nth (InferredModule.expression-types module)
+                                                                   i))))))
       (for [i 0 (Array.length (InferredModule.calls module))]
         (let [call (Array.unsafe-nth (InferredModule.calls module) i)]
           (Array.push-back! &calls
                             (CallSite.init @(CallSite.id call)
                                            (CoreRef.copy (CallSite.reference call))
                                            (Box.init
-                                             (Type.apply substitution
-                                                         (Box.peek (CallSite.type call))))
+                                             (Type.solver-apply &solver
+                                                                (Box.peek (CallSite.type call))))
                                            (match-ref (CallSite.owner call)
                                              (Maybe.Just owner)
                                                (Maybe.Just (CoreRef.copy owner))
@@ -137,8 +145,8 @@ committed definition makes a dormant polymorphic call reachable.")
                                                      (Maybe.Nothing)
                                                        (Maybe.Nothing))
                                                    (Box.init
-                                                     (Type.apply substitution
-                                                                 (Box.peek (InferredNodeType.type node))))))))
+                                                     (Type.solver-apply &solver
+                                                                        (Box.peek (InferredNodeType.type node))))))))
       (for [i 0 (Array.length (InferredModule.binding-types module))]
         (let [binding (Array.unsafe-nth (InferredModule.binding-types module) i)]
           (Array.push-back! &binding-types
@@ -149,8 +157,8 @@ committed definition makes a dormant polymorphic call reachable.")
                                   (Maybe.Just (CoreRef.copy owner))
                                 (Maybe.Nothing) (Maybe.Nothing))
                               (Box.init
-                                (Type.apply substitution
-                                            (Box.peek (InferredBindingType.type binding))))))))
+                                (Type.solver-apply &solver
+                                                   (Box.peek (InferredBindingType.type binding))))))))
       (InferredModule.init environment
                            expression-types
                            calls
@@ -351,7 +359,7 @@ traces retained once by `CompilerSession`.")
             (match-ref (CoreBuiltinSource.payload source)
               (CoreBuiltinPayload.Template _ _)
                 (set! result (SessionDefKind.Other (String.copy "template")))
-              (CoreBuiltinPayload.External _)
+              (CoreBuiltinPayload.External _ _)
                 (set! result (SessionDefKind.External))))))
       (for [i 0 (Array.length (CoreModule.constructors core))]
         (when (CoreIR.same-ref?
@@ -1382,8 +1390,13 @@ runtime, type, interface, implementation, template, and macro environments.")
   (defn ownership-action-context [action]
     (match-ref action
       (OwnershipAction.Move site _ _ _) @(OwnershipSite.context site)
-      (OwnershipAction.Borrow site _) @(OwnershipSite.context site)
+      (OwnershipAction.Borrow site _ _) @(OwnershipSite.context site)
       (OwnershipAction.Delete site _ _) @(OwnershipSite.context site)))
+
+  (private ownership-access-context)
+  (hidden ownership-access-context)
+  (defn ownership-access-context [access]
+    @(OwnershipSite.context (OwnershipAccess.site access)))
 
   (private int-member?)
   (hidden int-member?)
@@ -1413,6 +1426,83 @@ runtime, type, interface, implementation, template, and macro environments.")
               (Array.push-back! &result (SpannedOwnershipAction.copy action)))))
         result)))
 
+  (private target-ownership-accesses)
+  (hidden target-ownership-accesses)
+  (defn target-ownership-accesses [plan provenance reference]
+    (let-do [contexts (the (Array Int) [])
+             plan-contexts (OwnershipPlan.contexts plan)]
+      (for [i 0 (Array.length plan-contexts)]
+        (match-ref (Array.unsafe-nth plan-contexts i)
+          (OwnershipContext.Definition candidate _ _ _)
+            (when (CoreIR.same-ref? candidate reference)
+              (Array.push-back! &contexts i))
+          (OwnershipContext.Roots _) ()))
+      (let-do [spanned (Ownership.spanned-accesses plan provenance)
+               result (the (Array SpannedOwnershipAccess) [])]
+        (for [i 0 (Array.length &spanned)]
+          (let [access (Array.unsafe-nth &spanned i)]
+            (when (int-member?
+                    &contexts
+                    (ownership-access-context
+                      (SpannedOwnershipAccess.access access)))
+              (Array.push-back! &result
+                                (SpannedOwnershipAccess.copy access)))))
+        result)))
+
+  (private target-ownership-summaries)
+  (hidden target-ownership-summaries)
+  (defn target-ownership-summaries [plan reference]
+    (let-do [result (the (Array OwnershipFunctionSummary) [])
+             summaries (OwnershipPlan.summaries plan)]
+      (for [i 0 (Array.length summaries)]
+        (let [summary (Array.unsafe-nth summaries i)]
+          (when (CoreIR.same-ref? (OwnershipFunctionSummary.reference summary)
+                                  reference)
+            (Array.push-back! &result (OwnershipFunctionSummary.copy summary)))))
+      result))
+
+  (private ownership-foreign-contracts)
+  (hidden ownership-foreign-contracts)
+  (defn ownership-foreign-contracts [plan]
+    (let-do [result (the (Array OwnershipForeignContract) [])
+             contracts (OwnershipPlan.foreign-contracts plan)]
+      (for [i 0 (Array.length contracts)]
+        (Array.push-back! &result
+                          (OwnershipForeignContract.copy
+                            (Array.unsafe-nth contracts i))))
+      result))
+
+  (private root-reference)
+  (hidden root-reference)
+  (defn root-reference [core name]
+    (let-do [result (the (Maybe CoreRef) (Maybe.Nothing))
+             functions (CoreModule.functions core)]
+      (for [i 0 (Array.length functions)]
+        (let [reference (CoreFunction.reference
+                          (Array.unsafe-nth functions i))]
+          (when (String.= (CoreRef.name reference) name)
+            (set! result (Maybe.Just (CoreRef.copy reference))))))
+      result))
+
+  (private library-ownership-reports)
+  (hidden library-ownership-reports)
+  (defn library-ownership-reports [core inferred provenance plan roots]
+    (let-do [reports (the (Array OwnershipReport) [])]
+      (for [i 0 (Array.length roots)]
+        (let [name (Array.unsafe-nth roots i)]
+          (match (root-reference core name)
+            (Maybe.Just reference)
+              (Array.push-back! &reports
+                (OwnershipReport.init
+                  (String.copy name)
+                  (scheme-for-reference inferred &reference)
+                  (target-ownership-actions plan provenance &reference)
+                  (target-ownership-accesses plan provenance &reference)
+                  (target-ownership-summaries plan &reference)
+                  (ownership-foreign-contracts plan)))
+            (Maybe.Nothing) ())))
+      reports))
+
   (private diagnostic-at-reference)
   (hidden diagnostic-at-reference)
   (defn diagnostic-at-reference [phase message provenance reference]
@@ -1438,6 +1528,7 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                    provenance (CoreProvenance.append
                      (CompilerSession.base-provenance session)
                      (SessionOverlay.provenance overlay))
+                   inferred (session-analysis session overlay)
                    requests (ownership-requests (SessionOverlay.inferred overlay)
                                                 &reference)]
             (if (Int.= 0 (Array.length &requests))
@@ -1449,7 +1540,7 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                          &provenance
                                          &reference))
               (match (Specialize.module-with &core
-                                             (SessionOverlay.inferred overlay)
+                                             &inferred
                                              &requests)
                 (Result.Error error)
                   (Result.Error
@@ -1473,7 +1564,13 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                                                     &reference)
                                               (target-ownership-actions &plan
                                                                         &provenance
-                                                                        &reference))))))))))
+                                                                        &reference)
+                                              (target-ownership-accesses &plan
+                                                                         &provenance
+                                                                         &reference)
+                                              (target-ownership-summaries &plan
+                                                                          &reference)
+                                              (ownership-foreign-contracts &plan))))))))))
 
   (private compatible-definition-kind?)
   (hidden compatible-definition-kind?)
@@ -1742,6 +1839,9 @@ allocation, inference, and code generation occur on private copies and cannot
 mutate the session. A cell is a top level, so a value it ends on is echoed the
 way the driver echoes one, and a client does not have to guess whether a type's
 `str` takes its argument by reference or by value.")
+  (doc emit-library "emits the same transient program as `emit-cell`, but as a
+C library translation unit without a process entry point or top-level echo.
+`roots` names every source-level function that the native host will export.")
   (private emit-mark!)
   (hidden emit-mark!)
   ;; Prints elapsed milliseconds per emit-cell step under CARP_DEBUG_EMIT, the
@@ -1768,7 +1868,9 @@ it. Optional: emit-cell does it on demand.")
       (Array.push-back! (CompilerSession.analysis session)
                         (normalized-analysis (CompilerSession.base-inferred session)))))
 
-  (defn emit-cell [session input]
+  (private emit-cell-with)
+  (hidden emit-cell-with)
+  (defn emit-cell-with [session input executable roots]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]
       (match (Surface.parse-input-diagnosed input)
         (Result.Success parsed)
@@ -1811,12 +1913,42 @@ it. Optional: emit-cell does it on demand.")
                                                                                    &inferred)
                                        _m4 (emit-mark! "analysis-appended"
                                                        started)]
-                                (match (CarpCompiler.compile-inferred-module-echoed &complete-core
-                                                                                    &complete-inferred)
-                                  (Result.Success c)
+                                (match (if executable
+                                         (match
+                                           (CarpCompiler.compile-inferred-module-echoed
+                                             &complete-core
+                                             &complete-inferred)
+                                           (Result.Success c)
+                                             (Result.Success
+                                               (LibraryArtifact.init c []))
+                                           (Result.Error error)
+                                             (Result.Error error))
+                                         (match
+                                           (CarpCompiler.compile-inferred-library-artifact-roots
+                                             &complete-core
+                                             &complete-inferred
+                                             roots)
+                                           (Result.Success artifact)
+                                             (let [provenance (CoreProvenance.append
+                                                   &(CoreProvenance.append
+                                                      (CompilerSession.base-provenance session)
+                                                      (SessionOverlay.provenance overlay))
+                                                   (ProvenancedCoreModule.provenance &derived))]
+                                               (Result.Success
+                                                 (LibraryArtifact.init
+                                                   (String.copy (Pair.a &artifact))
+                                                   (library-ownership-reports
+                                                     &complete-core
+                                                     &complete-inferred
+                                                     &provenance
+                                                     (Pair.b &artifact)
+                                                     roots))))
+                                           (Result.Error error)
+                                             (Result.Error error)))
+                                  (Result.Success artifact)
                                     (do
                                       (emit-mark! "compiled" started)
-                                      (Result.Success c))
+                                      (Result.Success artifact))
                                   (Result.Error error)
                                     (Result.Error (compile-diagnostic &error
                                                                       input))))
@@ -1829,6 +1961,15 @@ it. Optional: emit-cell does it on demand.")
             (Result.Error error)
               (Result.Error (expand-diagnostic &error (SourceInput.id input))))
         (Result.Error diagnostic) (Result.Error diagnostic))))
+
+  (defn emit-cell [session input]
+    (match (emit-cell-with session input true &(the (Array String) []))
+      (Result.Success artifact)
+        (Result.Success (String.copy (LibraryArtifact.c &artifact)))
+      (Result.Error diagnostic) (Result.Error diagnostic)))
+
+  (defn emit-library [session input roots]
+    (emit-cell-with session input false roots))
 
   (defn infer-cell [session input]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]

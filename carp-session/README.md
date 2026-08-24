@@ -9,7 +9,9 @@ and implementations can be committed and queried with `Session.upsert`,
 `Session.remove`, and `Session.definitions`. Warm editor queries expose
 ownership plans, macro expansion, completion, and structured documentation.
 `Session.emit-cell` emits a deterministic executable C translation unit without
-mutating the session. `Session.create` loads and checks Core once; subsequent
+mutating the session, while `Session.emit-library` accepts explicit named roots
+and emits the corresponding entry-point-free translation unit for native
+hosts. `Session.create` loads and checks Core once; subsequent
 cells and definition rebuilds reuse the warm Core expansion, resolution, and
 inference snapshots.
 
@@ -36,6 +38,11 @@ currently creates a session in about 1.88 seconds and checks 100 43-byte cells
 in about 3.80 seconds: 38.0 ms per cell, with zero failures. The measured peak
 memory footprint is about 119 MB (`/usr/bin/time -l`; max RSS about 234 MB).
 
+Base trace normalization uses `Type.solver-from-substitution`, so variable
+lookup is indexed rather than scanning the complete inference substitution for
+every type node. On the Carpaccio development host, resident creation measured
+about 5.2 seconds and a first rooted library emission about 0.37 seconds.
+
 `test/memory.carp` runs one explicit compiler warm-up, records the stabilized
 allocation balance, then performs 20 cycles containing successful and failed
 upserts, successful and failed cell checks, editor queries, C emission, derived
@@ -43,3 +50,17 @@ types, interface dispatch, and reset. With `--log-memory`, every measured cycle
 returns exactly to that baseline; this guards against per-edit leaks while
 allowing one-time lazy compiler caches to remain resident.
 See [`docs/carp-session.md`](../docs/carp-session.md) for the complete API plan.
+
+`server-cbor.carp` is the resident protocol host used by Carpaccio. It frames
+strict deterministic CBOR with a four-byte big-endian length and imposes a
+64 MiB frame cap. Requests and responses use fixed four-element arrays, so the
+transport has no dependency on JVM EDN or JSON conventions. Its `ownership`
+operation returns canonical CBOR maps containing concrete actions, normalized
+projected-place accesses, per-function affine summaries, reachable foreign
+contracts, specialization-context and expression IDs, resolved resources, and
+half-open UTF-8 source spans. Callers may supply a stable source ID with
+`upsert` so editor buffers can join the report without depending on protocol
+request IDs. `emit-library` returns a versioned map containing the C translation
+unit and one ownership report per requested root. Those reports are taken from
+the exact ownership plan used by lowering, so native hosts never need a second
+analysis run to construct their ABI manifest.

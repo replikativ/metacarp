@@ -99,8 +99,14 @@ other globals.")
 (deftype CoreBuiltin [reference CoreRef
                       signature (Box CoreType)])
 
+(deftype CoreForeignParameterMode
+  (Copy [])
+  (Take [])
+  (Shared [])
+  (Unique []))
+
 (deftype CoreBuiltinPayload
-  (External [(Maybe String)])
+  (External [(Maybe String) (Maybe (Array CoreForeignParameterMode))])
   (Template [String String]))
 
 (doc CoreBuiltinSource "retains source-level lowering data for register and

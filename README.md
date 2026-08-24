@@ -24,6 +24,23 @@ carp -b --optimize main.carp
 
 This produces `./out/carp-compiler`.
 
+The repository also retains `out/main.c` as a directly linkable bootstrap
+seed. This is useful when a compiler change affects the bootstrap compiler
+itself:
+
+```sh
+clang -O3 -D NDEBUG -I "$CARP_DIR/core" -o /tmp/carp-stage0 out/main.c -lm
+/tmp/carp-stage0 -c "$CARP_DIR/core" -o /tmp/carp-stage1.c main.carp
+clang -O3 -D NDEBUG -I "$CARP_DIR/core" -o /tmp/carp-stage1 /tmp/carp-stage1.c -lm
+/tmp/carp-stage1 -c "$CARP_DIR/core" -o /tmp/carp-stage2.c main.carp
+cmp /tmp/carp-stage1.c /tmp/carp-stage2.c
+```
+
+Only promote the stage-1 binary after the fixed-point comparison and a smoke
+compile succeed. On the development host a full generation currently takes
+about 3.5 minutes and peaks near 0.9 GiB; this is a bootstrap operation, not
+the latency of resident incremental compilation.
+
 ## Usage
 
 ```
@@ -34,6 +51,7 @@ carp-compiler [options] <source.carp>
   -c, --core <dir>      compile against the Carp standard library in <dir>
   -o, --output <file>   output path — the C file, or the executable under -b
   --optimize            build -b/-x executables with clang -O3 -D NDEBUG
+  --library             emit C without a process entry point (needs --core)
   --no-core             skip the implicit Core load; the source's own
                         (load "X.carp") directives still resolve in --core
   -h, --help            show this help and exit
@@ -44,6 +62,12 @@ With no `-b`/`-x`, the C translation unit is written to standard output (or
 `-o`). Diagnostics go to standard error and name the rejecting compiler phase.
 `-b`/`-x` require `--core`, because linking needs the runtime headers the
 standard library ships with.
+
+`--library` selects the backend's reusable translation unit: named roots and
+global initialization remain available, but the platform
+`int main(int, char**)` entry point is omitted. Embedders are responsible for
+stable exported wrappers and for calling `carp_init_globals` when the module
+contains runtime-initialized globals.
 
 `(load ...)` resolves like the reference compiler's: relative to the loading
 file, then the Core directory — and git references install into the shared

@@ -142,6 +142,8 @@ clients; its internal compiler representations are not API.
 (Session.prepare-emit (Ref Session)) -> ()
 (Session.emit-cell (Ref Session) SourceInput)
   -> (Result String Diagnostic)
+(Session.emit-library (Ref Session) SourceInput (Ref (Array String)))
+  -> (Result String Diagnostic)
 (Session.build-cell (Ref Session) SourceInput String)
   -> (Result BuildReport Diagnostic)
 ```
