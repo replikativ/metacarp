@@ -127,10 +127,17 @@ macro expansion, type resolution, and monomorphization.
 
 Generic roots may request explicit concrete arguments. Primitive arguments and
 recursive structural forms such as `(Vec u32)`, `(Option u64)`, and
-`(Result u32 i32)` are substituted through the rustdoc signature; an
+`(Result u32 i32)`, plus borrowed `Ref`/`MutRef` slice and container forms, are
+substituted through the rustdoc signature; an
 unambiguous public crate type may be named directly. The concrete result still
 has to satisfy the normal ABI-layout and ownership checks, so this does not
 turn an unresolved generic contract into an unchecked FFI boundary.
+
+Associated `Read::Error` and `Write::Error` projections remain rejected by
+default. An explicit debug-string error mode can normalize them to an affine
+owned UTF-8 buffer. A `Vec<u8>` writer mode constructs a native writer inside
+the adapter and returns its storage as an affine buffer, allowing generic
+buffer-oriented serializers to remain zero-copy at the host boundary.
 
 The REPL-facing API is intended to have two phases:
 
