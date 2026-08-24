@@ -204,8 +204,9 @@ constructor, shared-borrow, unique-borrow, and consuming operations from the
 `Self` receiver. Shared and unique borrowed methods on admitted shared records
 can be selected as adapter roots.
 
-Non-generic opaque structs are represented as nominal Carp `void*` owner
-types. A generated constructor returns `Box<T>::into_raw`; borrowed methods use
+Opaque structs and enums are represented as nominal Carp `void*` owner types.
+Concrete generic instantiations have distinct nominal names, destructor
+symbols, and Rust types. A generated constructor returns `Box<T>::into_raw`; borrowed methods use
 `(Ref Owner)` and receive a pointer cell from which Rust reconstructs `&T` or
 `&mut T`; a consuming method reconstructs the box and moves out `T`; and the
 generated `delete` implementation calls a panic-contained Rust destructor.
@@ -225,6 +226,11 @@ lease their source owner on the JVM. By-value slice/string views in standalone
 Carp use a nominal C carrier with a phantom `(Ref Owner lifetime)` type
 argument. The existing nested-lifetime analysis consequently retains the owner
 without changing the C representation or adding runtime bookkeeping.
+Retained generic owners use the same mechanism: for example,
+`Reader<&[u8]>` carries a phantom reference to its source array. Rust storage is
+erased to an adapter-internal `'static` spelling, while `borrows-from` and the
+phantom type preserve the real lexical lifetime in Carp. The Clojure importer
+requires `pinned-slice`/`pinned-utf8` for such retained inputs.
 
 For iterative development, `cargo/import-local!` accepts an unmodified local
 `Cargo.toml` and runs the same extraction/generation path. Rust source files,
@@ -240,8 +246,9 @@ decode it to `Maybe T`. Owned Roaring iteration now runs through
 `IntoIterator::into_iter` and `Iterator::next`; borrowed iteration uses a JVM
 source lease. Concrete scalar ranges, primitive slices, UTF-8 `&str`, and
 scalar `Result<T,E>` use generated stable carriers or expanded scalar ABIs.
-Generic `RangeBounds`, retained slices, callback/vtable I/O, and owned
-string/vector projection remain later work.
+Generic `RangeBounds` and callback/vtable I/O remain later work. Retained
+slices through concrete generic owners and owned string/vector projection are
+implemented.
 
 There are three compilation tiers over one manifest and ownership IR:
 
@@ -271,6 +278,8 @@ Primitive/shared record adapters, recursive automatic layouts, layout
 attestation, inherent/trait method projection, opaque owners, slices, UTF-8
 inputs, scalar `Option`/`Result`, concrete ranges, auto-trait thread policies,
 owned iterators, and JVM borrowed-result leases are implemented.
+Concrete generic opaque owners, explicit enclosing-impl specialization, and
+phantom retained-source types are also implemented.
 
 1. Keep the existing descriptor-path importer as a deterministic fixture and
    explicit escape hatch; canonical CBOR is authoritative and EDN is legacy.
