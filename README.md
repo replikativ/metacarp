@@ -22,24 +22,22 @@ source through reference Carp:
 carp -b --optimize main.carp
 ```
 
-This produces `./out/carp-compiler`.
-
-The repository also retains `out/main.c` as a directly linkable bootstrap
-seed. This is useful when a compiler change affects the bootstrap compiler
-itself:
+This produces `./out/carp-compiler` and `./out/main.c`. The entire `out/`
+directory is generated and ignored; neither file is a trusted bootstrap seed.
+Always rebuild generation 1 after changing compiler source, then validate it:
 
 ```sh
-clang -O3 -D NDEBUG -I "$CARP_DIR/core" -o /tmp/carp-stage0 out/main.c -lm
-/tmp/carp-stage0 -c "$CARP_DIR/core" -o /tmp/carp-stage1.c main.carp
-clang -O3 -D NDEBUG -I "$CARP_DIR/core" -o /tmp/carp-stage1 /tmp/carp-stage1.c -lm
-/tmp/carp-stage1 -c "$CARP_DIR/core" -o /tmp/carp-stage2.c main.carp
-cmp /tmp/carp-stage1.c /tmp/carp-stage2.c
+CARP_FIXED_POINT_OUT=/tmp/metacarp-fixed \
+  ./scripts/check-fixed-point.sh
 ```
 
-Only promote the stage-1 binary after the fixed-point comparison and a smoke
-compile succeed. On the development host a full generation currently takes
-about 3.5 minutes and peaks near 0.9 GiB; this is a bootstrap operation, not
-the latency of resident incremental compilation.
+The harness emits generation 2 and generation 3, links with `-O3 -D NDEBUG`,
+requires byte-identical C, compiles and runs `examples/hello.carp`, and records
+source/compiler hashes in `bootstrap-provenance.txt`. Only promote a compiler
+after those checks succeed. At revision `7aee762`, reference Carp built
+generation 1 in 527.04 seconds at about 1.09 GiB; optimized Meta-Carp emitted
+the next generation in 99.49 seconds at about 0.91 GiB. This is a bootstrap
+operation, not the latency of resident incremental compilation.
 
 ## Usage
 
@@ -97,15 +95,18 @@ Compile and run a program that uses the standard library:
 
 ## Self-hosting
 
-The bootstrap chain, from the repository root:
+The bootstrap chain, from the repository root, is automated by the assurance
+harness:
 
 ```sh
-carp -b --optimize main.carp                                    # gen 1
-./out/carp-compiler -c "$CARP_DIR/core" -o self.c main.carp     # gen 1 emits itself
-clang -O3 -D NDEBUG -o self-cc self.c -I "$CARP_DIR/core"      # link gen 2
-./self-cc -c "$CARP_DIR/core" -o self2.c main.carp              # gen 2 emits itself
-cmp self.c self2.c                                              # fixed point
+./scripts/run-assurance.sh self
 ```
+
+It freshly builds generation 1 with reference Carp before running the
+reference suite, fixed-point/provenance/smoke checks, and expansion parity.
+`scripts/check-fixed-point.sh` alone deliberately consumes
+`CARP_COMPILER` (default `out/carp-compiler`); do not point it at an old local
+artifact.
 
 The canonical generation benchmark compares reference Carp, gen 1, and gen 2
 on the same workload (generating C for `main.carp`):
