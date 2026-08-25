@@ -493,6 +493,36 @@
           (set! id @(SourceInput.id (SessionDefInfo.source definition))))))
     id))
 
+(defn forked-sessions-isolate-overlays? []
+  (match (make-session)
+    (Result.Success parent)
+      (let-do [child (Session.fork &parent)
+               parent-source (SourceInput.init
+                               (String.copy "cell:parent-only")
+                               (String.copy "(defn parent-only [] 1)"))
+               child-source (SourceInput.init
+                              (String.copy "cell:child-only")
+                              (String.copy "(defn child-only [] 2)"))
+               ok true]
+        (match (Session.upsert &parent &parent-source)
+          (Result.Success _) ()
+          (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
+        (match (Session.upsert &child &child-source)
+          (Result.Success _) ()
+          (Result.Error diagnostic) (set! ok (diagnostic-false &diagnostic)))
+        (let [parent-definitions (Session.definitions &parent)
+              child-definitions (Session.definitions &child)]
+          (unless (definition-named? &parent-definitions "parent-only")
+            (set! ok false))
+          (when (definition-named? &parent-definitions "child-only")
+            (set! ok false))
+          (unless (definition-named? &child-definitions "child-only")
+            (set! ok false))
+          (when (definition-named? &child-definitions "parent-only")
+            (set! ok false)))
+        ok)
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn multi-definition-inputs-reconcile-by-id? []
   (match (make-session)
     (Result.Success session)
@@ -946,7 +976,10 @@
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
 (deftest t
-  (assert-equal t 3 (Session.api-version) "session API version is explicit")
+  (assert-equal t 4 (Session.api-version) "session API version is explicit")
+  (assert-true t
+    (forked-sessions-isolate-overlays?)
+    "forked sessions share the warm base and isolate committed overlays")
   (assert-true t
     (definition-cell-has-structured-report?)
     "definition cells report their name, scheme, kind, and caller span")

@@ -85,23 +85,30 @@
 notebook cells. Mutable identity allocation is the only state changed by
 `infer-cell`; failed calls may consume IDs but cannot alter the warm semantic
 environment.")
-(deftype CompilerSession
-  [base-expansion (Rc ExpandSnapshot)
-   base-resolution ResolveSnapshot
-   base-core CoreModule
-   base-provenance CoreProvenance
-   base-documents (Array SessionDocument)
-   base-inferred InferredModule
-   base-interfaces (Rc (Array CoreInterface))
-   base-implementations (Rc (Array CoreImplementation))
-   overlay (Array SessionOverlay)
-   ;; a one-slot cache of the normalized base inference traces, filled on first
-   ;; use; the base cannot change, so it never goes stale
+(deftype CompilerSessionBase
+  [expansion (Rc ExpandSnapshot)
+   resolution ResolveSnapshot
+   core CoreModule
+   provenance CoreProvenance
+   documents (Array SessionDocument)
+   inferred InferredModule
+   interfaces (Rc (Array CoreInterface))
+   implementations (Rc (Array CoreImplementation))
+   ;; a shared one-slot cache of normalized base inference traces
    analysis (Array InferredModule)])
+
+(deftype CompilerSession
+  [base (Rc CompilerSessionBase)
+   overlay (Array SessionOverlay)])
 
 (defmodule Session
   (doc api-version "is the stable carp-session API revision.")
-  (defn api-version [] 3)
+  (defn api-version [] 4)
+
+  (private session-base)
+  (hidden session-base)
+  (defn session-base [session]
+    (Rc.value-ref (CompilerSession.base session)))
 
   (private append-inferred-analysis)
   (hidden append-inferred-analysis)
@@ -983,14 +990,16 @@ of its own.")
          (Result SessionOverlay Diagnostic)))
   (defn rebuild-overlay [session inputs reuse next-id]
     (let [initial (SessionOverlay.init
-            (Rc.copy (CompilerSession.base-expansion session))
-            (ResolveSnapshot.copy (CompilerSession.base-resolution session))
-            (Infer.compact-environment (CompilerSession.base-inferred session))
+            (Rc.copy (CompilerSessionBase.expansion (session-base session)))
+            (ResolveSnapshot.copy
+              (CompilerSessionBase.resolution (session-base session)))
+            (Infer.compact-environment
+              (CompilerSessionBase.inferred (session-base session)))
             (CoreIR.empty-module)
             (CoreProvenance.init [] [] [])
             (IdAllocator.init [next-id])
-            (Rc.copy (CompilerSession.base-interfaces session))
-            (Rc.copy (CompilerSession.base-implementations session))
+            (Rc.copy (CompilerSessionBase.interfaces (session-base session)))
+            (Rc.copy (CompilerSessionBase.implementations (session-base session)))
             []
             []
             []
@@ -1114,17 +1123,20 @@ the expensive expansion, resolution, and inference happen exactly once here.")
                                                                 []
                                                                 [])]
                             (Result.Success
-                              (CompilerSession.init base-expansion
-                                                    base-resolution
-                                                    @(ProvenancedCoreModule.core &derived)
-                                                    (CoreProvenance.copy
-                                                      (ProvenancedCoreModule.provenance &derived))
-                                                    base-documents
-                                                    inferred
-                                                    base-interfaces
-                                                    base-implementations
-                                                    [current]
-                                                    [])))
+                              (CompilerSession.init
+                                (Rc.new
+                                  (CompilerSessionBase.init
+                                    base-expansion
+                                    base-resolution
+                                    @(ProvenancedCoreModule.core &derived)
+                                    (CoreProvenance.copy
+                                      (ProvenancedCoreModule.provenance &derived))
+                                    base-documents
+                                    inferred
+                                    base-interfaces
+                                    base-implementations
+                                    []))
+                                [current])))
                         (Result.Error diagnostic) (Result.Error diagnostic)))
                   (Result.Error error)
                     (Result.Error
@@ -1171,11 +1183,14 @@ normalized once and kept, and each call only normalizes the overlay, which
 holds what the user has committed since.")
   (defn session-analysis [session overlay]
     (do
-      (when (Int.= (Array.length (CompilerSession.analysis session)) 0)
-        (Array.push-back! (CompilerSession.analysis session)
-                          (normalized-analysis (CompilerSession.base-inferred session))))
+      (when (Int.= (Array.length
+                     (CompilerSessionBase.analysis (session-base session))) 0)
+        (Array.push-back!
+          (CompilerSessionBase.analysis (session-base session))
+          (normalized-analysis
+            (CompilerSessionBase.inferred (session-base session)))))
       (concat-analysis
-        (Array.unsafe-nth (CompilerSession.analysis session) 0)
+        (Array.unsafe-nth (CompilerSessionBase.analysis (session-base session)) 0)
         &(normalized-analysis (SessionOverlay.inferred overlay)))))
 
   (doc reset "drops committed user definitions while retaining the warm core.")
@@ -1185,19 +1200,30 @@ holds what the user has committed since.")
                (IdAllocator.cell (SessionOverlay.node-allocator old))
                0)
              fresh (SessionOverlay.init
-               (Rc.copy (CompilerSession.base-expansion session))
-               (ResolveSnapshot.copy (CompilerSession.base-resolution session))
-               (Infer.compact-environment (CompilerSession.base-inferred session))
+               (Rc.copy (CompilerSessionBase.expansion (session-base session)))
+               (ResolveSnapshot.copy
+                 (CompilerSessionBase.resolution (session-base session)))
+               (Infer.compact-environment
+                 (CompilerSessionBase.inferred (session-base session)))
                (CoreIR.empty-module)
                (CoreProvenance.init [] [] [])
                (IdAllocator.init [next-id])
-               (Rc.copy (CompilerSession.base-interfaces session))
-               (Rc.copy (CompilerSession.base-implementations session))
+               (Rc.copy (CompilerSessionBase.interfaces (session-base session)))
+               (Rc.copy (CompilerSessionBase.implementations (session-base session)))
                []
                []
                []
                [])]
       (set-overlay! session fresh)))
+
+  (doc fork "creates an independent compiler session by sharing the immutable
+warm base and its normalized-analysis cache while copying only the mutable
+  overlay. This is the cheap session-clone operation used by interactive hosts.")
+  (defn fork [session]
+    (CompilerSession.init
+      (Rc.copy (CompilerSession.base session))
+      [(SessionOverlay.copy
+         (Array.unsafe-nth (CompilerSession.overlay session) 0))]))
 
   (doc definitions "returns committed user definitions in dependency order.")
   (defn definitions [session]
@@ -1208,7 +1234,8 @@ holds what the user has committed since.")
   (private completion-documents)
   (hidden completion-documents)
   (defn completion-documents [session overlay]
-    (let-do [result (Array.copy (CompilerSession.base-documents session))]
+    (let-do [result (Array.copy
+                      (CompilerSessionBase.documents (session-base session)))]
       (for [i 0 (Array.length (SessionOverlay.inputs overlay))]
         (let [documents (documents-from-input
                 (Array.unsafe-nth (SessionOverlay.inputs overlay) i))]
@@ -1263,7 +1290,8 @@ holds what the user has committed since.")
 runtime, type, interface, implementation, template, and macro environments.")
   (defn complete [session prefix]
     (let-do [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)
-             core (CoreIR.append-modules (CompilerSession.base-core session)
+             core (CoreIR.append-modules
+                     (CompilerSessionBase.core (session-base session))
                                          (SessionOverlay.core overlay))
              documents (completion-documents session overlay)
              candidates (the (Array Candidate) [])
@@ -1529,10 +1557,11 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                 &[@"unknown session definition: " (String.copy name)])
               (Maybe.Nothing)))
         (Maybe.Just reference)
-          (let-do [core (CoreIR.append-modules (CompilerSession.base-core session)
+          (let-do [core (CoreIR.append-modules
+                          (CompilerSessionBase.core (session-base session))
                                                (SessionOverlay.core overlay))
-                   provenance (CoreProvenance.append
-                     (CompilerSession.base-provenance session)
+                     provenance (CoreProvenance.append
+                     (CompilerSessionBase.provenance (session-base session))
                      (SessionOverlay.provenance overlay))
                    inferred (session-analysis session overlay)
                    requests (ownership-requests (SessionOverlay.inferred overlay)
@@ -1874,9 +1903,12 @@ C library translation unit without a process entry point or top-level echo.
 normalizing the base's inference traces — so the first cell does not pay for
 it. Optional: emit-cell does it on demand.")
   (defn prepare-emit [session]
-    (when (Int.= (Array.length (CompilerSession.analysis session)) 0)
-      (Array.push-back! (CompilerSession.analysis session)
-                        (normalized-analysis (CompilerSession.base-inferred session)))))
+    (when (Int.= (Array.length
+                   (CompilerSessionBase.analysis (session-base session))) 0)
+      (Array.push-back!
+        (CompilerSessionBase.analysis (session-base session))
+        (normalized-analysis
+          (CompilerSessionBase.inferred (session-base session))))))
 
   (private emit-cell-with)
   (hidden emit-cell-with)
@@ -1911,7 +1943,9 @@ it. Optional: emit-cell does it on demand.")
                                                                  (SessionOverlay.inferred overlay))
                             (Result.Success inferred)
                               (let-do [_m2 (emit-mark! "inferred" started)
-                                       core (CoreIR.append-modules (CompilerSession.base-core session)
+                                       core (CoreIR.append-modules
+                                              (CompilerSessionBase.core
+                                                (session-base session))
                                                                    (SessionOverlay.core overlay))
                                        complete-core (CoreIR.append-modules &core
                                                                             (ProvenancedCoreModule.core &derived))
@@ -1941,7 +1975,8 @@ it. Optional: emit-cell does it on demand.")
                                            (Result.Success artifact)
                                              (let [provenance (CoreProvenance.append
                                                    &(CoreProvenance.append
-                                                      (CompilerSession.base-provenance session)
+                                                      (CompilerSessionBase.provenance
+                                                        (session-base session))
                                                       (SessionOverlay.provenance overlay))
                                                    (ProvenancedCoreModule.provenance &derived))]
                                                (Result.Success

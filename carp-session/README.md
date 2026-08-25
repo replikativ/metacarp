@@ -2,8 +2,8 @@
 
 Warm, transport-independent compiler sessions for notebook and editor hosts.
 
-The API provides `Session.api-version`, `Session.create`,
-`Session.create-from-module`, `Session.reset`, and transactional
+The revision-4 API provides `Session.api-version`, `Session.create`,
+`Session.create-from-module`, `Session.fork`, `Session.reset`, and transactional
 `Session.infer-cell`. Runtime definitions, macros, nominal types, interfaces,
 and implementations can be committed and queried with `Session.upsert`,
 `Session.remove`, and `Session.definitions`. Warm editor queries expose
@@ -17,9 +17,10 @@ not source-controlled build commands. `Session.create` loads and checks Core onc
 cells and definition rebuilds reuse the warm Core expansion, resolution, and
 inference snapshots.
 
-The immutable base expansion snapshot is shared with the current overlay via
-`Rc`; it is copied only when expansion actually commits a user definition.
-This keeps cheap reset support without duplicating the resident Core state.
+The immutable warm compiler base is held behind one `Rc`. `Session.fork`
+increments that reference and copies only the mutable overlay, so nREPL clones
+do not reload Core or duplicate its resident state. Expansion snapshots within
+an overlay are copied only when expansion commits a user definition.
 
 Replacement is atomic: the candidate overlay is rebuilt before it is committed,
 and resolved global-reference edges identify its transitive dependents. Failed
