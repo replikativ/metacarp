@@ -935,7 +935,7 @@
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
 (deftest t
-  (assert-equal t 1 (Session.api-version) "session API version is explicit")
+  (assert-equal t 2 (Session.api-version) "session API version is explicit")
   (assert-true t
     (definition-cell-has-structured-report?)
     "definition cells report their name, scheme, kind, and caller span")

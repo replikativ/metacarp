@@ -57,17 +57,9 @@ returns exactly to that baseline; this guards against per-edit leaks while
 allowing one-time lazy compiler caches to remain resident.
 See [`docs/carp-session.md`](../docs/carp-session.md) for the complete API plan.
 
-`server-cbor.carp` is the resident protocol host used by Carpaccio. It frames
-strict deterministic CBOR with a four-byte big-endian length and imposes a
-64 MiB frame cap. Requests and responses use fixed four-element arrays, so the
-transport has no dependency on JVM EDN or JSON conventions. Its `ownership`
-operation returns canonical CBOR maps containing concrete actions, normalized
-projected-place accesses, per-function affine summaries, reachable foreign
-contracts, unsafe type mobility attestations, ownership-transfer requirements,
-specialization-context and expression IDs, resolved resources, and half-open
-UTF-8 source spans. Callers may supply a stable source ID with
-`upsert` so editor buffers can join the report without depending on protocol
-request IDs. `emit-library` returns a versioned map containing the C translation
-unit and one ownership report per requested root. Those reports are taken from
-the exact ownership plan used by lowering, so native hosts never need a second
-analysis run to construct their ABI manifest.
+The session API is deliberately transport-neutral. Carpaccio owns the resident
+CBOR protocol adapter and its codec in `carp/SessionServer.carp` and
+`carp/Cbor.carp`; Meta-Carp therefore has no source or build dependency on a
+sibling application checkout. The adapter exposes ownership reports and rooted
+library emission from the exact ownership plan used by lowering, so native
+hosts never need a second analysis run to construct their ABI manifest.

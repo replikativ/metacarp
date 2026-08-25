@@ -99,7 +99,7 @@ environment.")
 
 (defmodule Session
   (doc api-version "is the stable carp-session API revision.")
-  (defn api-version [] 1)
+  (defn api-version [] 2)
 
   (private append-inferred-analysis)
   (hidden append-inferred-analysis)
