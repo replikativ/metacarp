@@ -68,6 +68,13 @@
    builtins (Array CoreBuiltin)
    declarations (Array CoreConstructorDeclaration)])
 
+(deftype TypeCapabilityShape [name String
+                              span SurfaceSpan])
+
+(deftype TransferRequirementShape [name String
+                                   arguments (Array Int)
+                                   span SurfaceSpan])
+
 (deftype CollectedForms
   [functions (Array FunctionShape)
    values (Array ValueShape)
@@ -77,6 +84,8 @@
    interfaces (Array TypedShape)
    implementations (Array ImplementationShape)
    imports (Array ScopedImport)
+   type-capabilities (Array TypeCapabilityShape)
+   transfer-requirements (Array TransferRequirementShape)
    system-includes (Array String)
    expressions (Array ScopedExpression)
    globals (Array CoreRef)])
@@ -1578,6 +1587,10 @@ submodules — may use its private bindings; everyone else may not.")
   (hidden add-import!)
   (private system-include-shape)
   (hidden system-include-shape)
+  (private type-capability-shape)
+  (hidden type-capability-shape)
+  (private transfer-requirement-shape)
+  (hidden transfer-requirement-shape)
   (private preproc-text)
   (hidden preproc-text)
   (private qualified-head?)
@@ -1785,6 +1798,64 @@ then reuse a reserved id.")
               (error-at form @"system-include expects one path string"))))
       _ (Result.Error (error-at form @"system-include must be a list"))))
 
+  (defn type-capability-shape [form scope]
+    (match-ref (SurfaceNode.form form)
+      (SurfaceForm.List raw-items)
+        (let [items (semantic-items raw-items)]
+          (if (Int.= 2 (Array.length &items))
+            (let [target (Box.peek (Array.unsafe-nth &items 1))]
+              (match (symbol-key target)
+                (Maybe.Just name)
+                  (Result.Success
+                    (TypeCapabilityShape.init (qualify-name scope &name)
+                                              @(SurfaceNode.span form)))
+                (Maybe.Nothing)
+                  (Result.Error
+                    (error-at target @"unsafe-sendable target must be a type symbol"))))
+            (Result.Error
+              (error-at form @"unsafe-sendable expects one type symbol"))))
+      _ (Result.Error (error-at form @"unsafe-sendable must be a list"))))
+
+  (defn transfer-requirement-shape [form scope]
+    (match-ref (SurfaceNode.form form)
+      (SurfaceForm.List raw-items)
+        (let [items (semantic-items raw-items)]
+          (if (Int.= 3 (Array.length &items))
+            (let [target (Box.peek (Array.unsafe-nth &items 1))
+                  indexes (Box.peek (Array.unsafe-nth &items 2))]
+              (match (symbol-key target)
+                (Maybe.Just name)
+                  (match-ref (SurfaceNode.form indexes)
+                    (SurfaceForm.Array raw-indexes)
+                      (let-do [arguments (the (Array Int) [])
+                               valid true
+                               parsed-indexes (semantic-items raw-indexes)]
+                        (for [i 0 (Array.length &parsed-indexes)]
+                          (match-ref (SurfaceNode.form
+                              (Box.peek (Array.unsafe-nth &parsed-indexes i)))
+                            (SurfaceForm.IntLit value)
+                              (if (Int.>= @value 0)
+                                (Array.push-back! &arguments @value)
+                                (set! valid false))
+                            _ (set! valid false)))
+                        (if valid
+                          (Result.Success
+                            (TransferRequirementShape.init
+                              (qualify-name scope &name)
+                              arguments
+                              @(SurfaceNode.span form)))
+                          (Result.Error
+                            (error-at indexes
+                              @"requires-send indexes must be non-negative integers"))))
+                    _ (Result.Error
+                        (error-at indexes @"requires-send indexes must be an array")))
+                (Maybe.Nothing)
+                  (Result.Error
+                    (error-at target @"requires-send target must be a function symbol"))))
+            (Result.Error
+              (error-at form @"requires-send expects a target and index array"))))
+      _ (Result.Error (error-at form @"requires-send must be a list"))))
+
   (defn collect-scoped! [forms scope collected]
     (let-do [result (the (Result Unit ResolveError) (Result.Success ()))
              n (Array.length forms)]
@@ -1864,6 +1935,20 @@ then reuse a reserved id.")
                     (Array.push-back!
                       (CollectedForms.system-includes collected)
                       path)
+                  (Result.Error error) (set! result (Result.Error error)))
+
+                (declaration? form @"unsafe-sendable")
+                (match (type-capability-shape form scope)
+                  (Result.Success shape)
+                    (Array.push-back! (CollectedForms.type-capabilities collected)
+                                      shape)
+                  (Result.Error error) (set! result (Result.Error error)))
+
+                (declaration? form @"requires-send")
+                (match (transfer-requirement-shape form scope)
+                  (Result.Success shape)
+                    (Array.push-back! (CollectedForms.transfer-requirements collected)
+                                      shape)
                   (Result.Error error) (set! result (Result.Error error)))
 
                 (qualified-head? form "Unsafe.preproc")
@@ -1989,6 +2074,8 @@ then reuse a reserved id.")
                                          (Array.copy &*resolve-seed-imports*)
                                          []
                                          []
+                                         []
+                                         []
                                          (Array.copy &*resolve-seed-globals*))]
       (match (collect-scoped! forms "" &collected)
         (Result.Success _) (Result.Success collected)
@@ -1996,6 +2083,45 @@ then reuse a reserved id.")
 
   (private collect-with-generations)
   (hidden collect-with-generations)
+  (private core-type-capabilities)
+  (hidden core-type-capabilities)
+  (private resolve-transfer-requirements)
+  (hidden resolve-transfer-requirements)
+
+  (defn core-type-capabilities [shapes]
+    (let-do [result (the (Array CoreTypeCapability) [])]
+      (for [i 0 (Array.length shapes)]
+        (Array.push-back! &result
+                          (CoreTypeCapability.init
+                            @(TypeCapabilityShape.name
+                              (Array.unsafe-nth shapes i)))))
+      result))
+
+  (defn resolve-transfer-requirements [shapes globals]
+    (let-do [result (the (Result (Array CoreTransferRequirement) ResolveError)
+                         (Result.Success []))]
+      (for [i 0 (Array.length shapes)]
+        (match-ref &result
+          (Result.Success requirements)
+            (let [shape (Array.unsafe-nth shapes i)]
+              (match (global-by-name globals (TransferRequirementShape.name shape))
+                (Maybe.Just reference)
+                  (set! result
+                        (Result.Success
+                          (Array.push-back @requirements
+                            (CoreTransferRequirement.init
+                              reference
+                              @(TransferRequirementShape.arguments shape)))))
+                (Maybe.Nothing)
+                  (set! result
+                        (Result.Error
+                          (ResolveError.init
+                            (fmt "requires-send can't find `%s`"
+                                 (TransferRequirementShape.name shape))
+                            @(TransferRequirementShape.span shape))))))
+          (Result.Error _) ()))
+      result))
+
   (doc collect-with-generations "collects, then derives the type-redefinition
 table; when a type name IS redefined, collects a second time so every
 qualified definition name is born under its generation (the table is empty
@@ -4943,26 +5069,33 @@ guessed at.")
                                                                                           &all-globals
                                                                                           (CollectedForms.imports &collected))
                                                       (Result.Success expressions)
-                                                        (let [final-interfaces (append-core-interfaces &all-interfaces
-                                                                                                       &*overload-interfaces*)
-                                                              final-implementations (append-core-implementations &all-implementations
-                                                                                                                 &*overload-implementations*)
-                                                              module (CoreModule.init functions
-                                                                                      values
-                                                                                      all-builtins
-                                                                                      all-builtin-sources
-                                                                                      signatures
-                                                                                      type-declarations
-                                                                                      constructor-declarations
-                                                                                      final-interfaces
-                                                                                      final-implementations
-                                                                                      @(CollectedForms.system-includes &collected)
-                                                                                      expressions
-                                                                                      []
-                                                                                      [])]
-                                                          (if *provenance-enabled*
-                                                            (Result.Success module)
-                                                            (Result.Success (CoreIR.index-call-sites &module))))
+                                                        (match (resolve-transfer-requirements
+                                                            (CollectedForms.transfer-requirements &collected)
+                                                            &all-globals)
+                                                          (Result.Success transfer-requirements)
+                                                            (let [final-interfaces (append-core-interfaces &all-interfaces
+                                                                                                           &*overload-interfaces*)
+                                                                  final-implementations (append-core-implementations &all-implementations
+                                                                                                                     &*overload-implementations*)
+                                                                  module (CoreModule.init functions
+                                                                                          values
+                                                                                          all-builtins
+                                                                                          all-builtin-sources
+                                                                                          signatures
+                                                                                          type-declarations
+                                                                                          constructor-declarations
+                                                                                          final-interfaces
+                                                                                          final-implementations
+                                                                                          @(CollectedForms.system-includes &collected)
+                                                                                          expressions
+                                                                                          (core-type-capabilities
+                                                                                            (CollectedForms.type-capabilities &collected))
+                                                                                          transfer-requirements)]
+                                                              (if *provenance-enabled*
+                                                                (Result.Success module)
+                                                                (Result.Success (CoreIR.index-call-sites &module))))
+                                                          (Result.Error error)
+                                                            (Result.Error error))
                                                       (Result.Error error)
                                                         (Result.Error error)))
                                                 (Result.Error error)
