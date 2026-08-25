@@ -220,9 +220,12 @@ registry.
 [`carp-session`](carp-session/README.md) keeps an inferred core resident for
 notebook and editor clients, then provides transactional definition updates,
 cell-relative typed reports, ownership queries, completion, and incremental
-code generation. The design deliberately leaves transport and value hosting to
-clients such as Lepiter and GT. [`docs/carp-session.md`](docs/carp-session.md)
-records the original design and implementation history.
+code generation. Its API remains transport-neutral. Two optional native hosts
+exercise it directly: [`hosts/cbor`](hosts/cbor/README.md) provides the compact
+machine protocol used by Carpaccio, and [`hosts/nrepl`](hosts/nrepl/README.md)
+provides a JVM-free nREPL endpoint for existing editor and command-line tools.
+[`docs/carp-session.md`](docs/carp-session.md) records the original design and
+implementation history.
 
 ## Limitations
 
