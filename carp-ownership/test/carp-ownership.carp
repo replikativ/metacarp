@@ -182,13 +182,13 @@
                                                []
                                                [])]
     (Result.error?
-      &(Ownership.prepare &specialized &(OwnershipTypeFacts.init [] [] [])))))
+      &(Ownership.prepare &specialized &(OwnershipTypeFacts.init [] [] [] [])))))
 
 (defn ownership-facts []
   (let [string-key (CAbi.type-key &(MonoType.String))
         widget-key (CAbi.type-key &(MonoType.Named @"Widget" []))
         handle-key (CAbi.type-key &(MonoType.Named @"Handle" []))]
-    (OwnershipTypeFacts.init [string-key widget-key @&handle-key] [handle-key] [])))
+    (OwnershipTypeFacts.init [string-key widget-key @&handle-key] [handle-key] [] [])))
 
 (defn classified [type facts]
   (match (OwnershipClassify.classify type facts)
@@ -228,6 +228,15 @@
             (and (Int.= 1 (classified &widget-t &facts))
                  (Int.= 0 (classified &gadget-t &facts))))
         (Result.Error _) false) (Result.Error _) false))
+
+(defn delete-implementation-discharges-its-parameter? []
+  (match (prepare-source "(register-type Widget \"void*\")
+(defmodule Widget
+  (sig delete (Fn [Widget] ()))
+  (defn delete [widget] ())
+  (implements delete Widget.delete))")
+    (Result.Success plan) (Int.= 0 (count-deletes &plan))
+    (Result.Error _) false))
 
 (defn nested-facts-derivation? []
   (match (prepare-source "(defmodule Types
@@ -773,6 +782,9 @@
   (assert-true t
     (facts-derivation?)
     "ownership facts are derived from a module's declared delete implementations")
+  (assert-true t
+    (delete-implementation-discharges-its-parameter?)
+    "a delete implementation discharges its parameter without recursive implicit cleanup")
   (assert-true t
     (nested-facts-derivation?)
     "nested registered types retain their qualified delete ownership facts")
