@@ -57,9 +57,9 @@ returns exactly to that baseline; this guards against per-edit leaks while
 allowing one-time lazy compiler caches to remain resident.
 See [`docs/carp-session.md`](../docs/carp-session.md) for the complete API plan.
 
-The session API is deliberately transport-neutral. Carpaccio owns the resident
-CBOR protocol adapter and its codec in `carp/SessionServer.carp` and
-`carp/Cbor.carp`; Meta-Carp therefore has no source or build dependency on a
-sibling application checkout. The adapter exposes ownership reports and rooted
+The session API is deliberately transport-neutral. Carpaccio currently owns
+the resident CBOR protocol adapter in `carp/SessionServer.carp`, while the
+source-only `carp-cbor` package owns its reusable codec. Meta-Carp itself has no
+transport dependency. The adapter exposes ownership reports and rooted
 library emission from the exact ownership plan used by lowering, so native
 hosts never need a second analysis run to construct their ABI manifest.
