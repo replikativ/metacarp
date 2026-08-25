@@ -38,6 +38,12 @@ currently creates a session in about 1.88 seconds and checks 100 43-byte cells
 in about 3.80 seconds: 38.0 ms per cell, with zero failures. The measured peak
 memory footprint is about 119 MB (`/usr/bin/time -l`; max RSS about 234 MB).
 
+On the development Linux x86-64 host at `7aee762`, four runs of the same
+already-built benchmark created a session in 1.66--1.68 seconds and checked
+100 cells in 8.12--8.19 seconds: 81.15--81.87 ms per cell, with zero failures
+and about 348 MB peak RSS. Cross-platform absolute timings are not a regression
+comparison; retain both measurements until CI records per-platform history.
+
 Base trace normalization uses `Type.solver-from-substitution`, so variable
 lookup is indexed rather than scanning the complete inference substitution for
 every type node. On the Carpaccio development host, resident creation measured
