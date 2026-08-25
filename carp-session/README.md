@@ -11,7 +11,9 @@ ownership plans, macro expansion, completion, and structured documentation.
 `Session.emit-cell` emits a deterministic executable C translation unit without
 mutating the session, while `Session.emit-library` accepts explicit named roots
 and emits the corresponding entry-point-free translation unit for native
-hosts. `Session.create` loads and checks Core once; subsequent
+hosts. `Session.emit-library-with-build` additionally carries host-resolved
+include directories and native library paths in the artifact; these are data,
+not source-controlled build commands. `Session.create` loads and checks Core once; subsequent
 cells and definition rebuilds reuse the warm Core expansion, resolution, and
 inference snapshots.
 
@@ -57,9 +59,8 @@ returns exactly to that baseline; this guards against per-edit leaks while
 allowing one-time lazy compiler caches to remain resident.
 See [`docs/carp-session.md`](../docs/carp-session.md) for the complete API plan.
 
-The session API is deliberately transport-neutral. Carpaccio currently owns
-the resident CBOR protocol adapter in `carp/SessionServer.carp`, while the
-source-only `carp-cbor` package owns its reusable codec. Meta-Carp itself has no
-transport dependency. The adapter exposes ownership reports and rooted
+The session API is deliberately transport-neutral. The optional native adapter
+under `hosts/cbor` uses the source-only `carp-cbor` package; the session library
+itself has no transport dependency. The adapter exposes ownership reports and rooted
 library emission from the exact ownership plan used by lowering, so native
 hosts never need a second analysis run to construct their ABI manifest.

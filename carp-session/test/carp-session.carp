@@ -372,18 +372,29 @@
                                    (String.copy
                                      "(sig exported-id (Fn [Int] Int))
 (defn exported-id [x] (warm-id x))"))]
-        (match (Session.emit-library &session &cell &[(String.copy "exported-id")])
+        (match (Session.emit-library-with-build
+                 &session
+                 &cell
+                 &[(String.copy "exported-id")]
+                 &[(String.copy "/opt/example/include")]
+                 &[(String.copy "/opt/example/libexample.so")])
           (Result.Success artifact)
             (let [c (LibraryArtifact.c &artifact)
-                  ownership (LibraryArtifact.ownership &artifact)]
+                  ownership (LibraryArtifact.ownership &artifact)
+                  includes (LibraryArtifact.include-directories &artifact)
+                  links (LibraryArtifact.link-libraries &artifact)]
               (and (String.contains-string? c "exported")
                    (and (not (String.contains-string?
                                c
                                "int main(int argc, char** argv)"))
                         (and (Int.= 1 (Array.length ownership))
-                             (String.= (OwnershipReport.name
-                                         (Array.unsafe-nth ownership 0))
-                                       "exported-id")))))
+                             (and (String.= (OwnershipReport.name
+                                              (Array.unsafe-nth ownership 0))
+                                            "exported-id")
+                                  (and (String.= (Array.unsafe-nth includes 0)
+                                                "/opt/example/include")
+                                       (String.= (Array.unsafe-nth links 0)
+                                                 "/opt/example/libexample.so")))))))
           (Result.Error diagnostic) (diagnostic-false &diagnostic)))
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
@@ -935,7 +946,7 @@
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
 (deftest t
-  (assert-equal t 2 (Session.api-version) "session API version is explicit")
+  (assert-equal t 3 (Session.api-version) "session API version is explicit")
   (assert-true t
     (definition-cell-has-structured-report?)
     "definition cells report their name, scheme, kind, and caller span")

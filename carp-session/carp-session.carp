@@ -59,7 +59,9 @@
 
 (deftype LibraryArtifact
   [c String
-   ownership (Array OwnershipReport)])
+   ownership (Array OwnershipReport)
+   include-directories (Array String)
+   link-libraries (Array String)])
 
 (deftype SessionDocument [name String
                           documentation String
@@ -99,7 +101,7 @@ environment.")
 
 (defmodule Session
   (doc api-version "is the stable carp-session API revision.")
-  (defn api-version [] 2)
+  (defn api-version [] 3)
 
   (private append-inferred-analysis)
   (hidden append-inferred-analysis)
@@ -1928,7 +1930,7 @@ it. Optional: emit-cell does it on demand.")
                                              &complete-inferred)
                                            (Result.Success c)
                                              (Result.Success
-                                               (LibraryArtifact.init c []))
+                                               (LibraryArtifact.init c [] [] []))
                                            (Result.Error error)
                                              (Result.Error error))
                                          (match
@@ -1950,7 +1952,9 @@ it. Optional: emit-cell does it on demand.")
                                                      &complete-inferred
                                                      &provenance
                                                      (Pair.b &artifact)
-                                                     roots))))
+                                                     roots)
+                                                   []
+                                                   [])))
                                            (Result.Error error)
                                              (Result.Error error)))
                                   (Result.Success artifact)
@@ -1978,6 +1982,21 @@ it. Optional: emit-cell does it on demand.")
 
   (defn emit-library [session input roots]
     (emit-cell-with session input false roots))
+
+  (doc emit-library-with-build "emits a rooted library artifact and carries
+the host-resolved include directories and native libraries with it as data.
+The compiler never executes these values or treats source text as build
+authority; a host resolves, validates, fingerprints, and supplies them.")
+  (defn emit-library-with-build [session input roots include-directories link-libraries]
+    (match (emit-cell-with session input false roots)
+      (Result.Error diagnostic) (Result.Error diagnostic)
+      (Result.Success artifact)
+        (Result.Success
+          (LibraryArtifact.init
+            (String.copy (LibraryArtifact.c &artifact))
+            (Array.copy (LibraryArtifact.ownership &artifact))
+            (Array.copy include-directories)
+            (Array.copy link-libraries)))))
 
   (defn infer-cell [session input]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]

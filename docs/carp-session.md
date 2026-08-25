@@ -1,8 +1,8 @@
 # carp-session
 
-Status: API version 1 implemented; this document retains the original design rationale
+Status: API version 3 implemented; this document retains the original design rationale
 
-API version: 1
+API version: 3
 
 Primary client: incremental notebook environments such as Lepiter and GT
 
@@ -96,7 +96,7 @@ for the exact exported Carp field spelling.
   [definition DefInfo invalidated (Array String)])
 ```
 
-Types and schemes are exposed as rendered strings in API version 1. This keeps
+Types and schemes are exposed as rendered strings in API version 3. This keeps
 the boundary stable while the compiler's internal `MonoType`, `TypeScheme`,
 and substitution representation evolves. A future API version may add a
 structured type tree without removing the display form.
@@ -148,7 +148,7 @@ clients; its internal compiler representations are not API.
   -> (Result BuildReport Diagnostic)
 ```
 
-`upsert` accepts exactly one top-level definition form in API version 1. A
+`upsert` accepts exactly one top-level definition form in API version 3. A
 multi-form source is rejected with a parse diagnostic. `infer-cell`, `expand`,
 and `emit-cell` may accept multiple forms and never commit them.
 
@@ -299,7 +299,7 @@ core. Later work can make inference itself definition-incremental.
   display name, kind, scheme, and documentation.
 - `doc` returns structured documentation for one resolved name.
 
-Completion ranking and fuzzy matching remain host concerns in API version 1;
+Completion ranking and fuzzy matching remain host concerns in API version 3;
 the library returns deterministic candidates matching the supplied prefix.
 
 ## Code generation and build caching
@@ -370,7 +370,7 @@ be configurable rather than embedded in the notebook protocol.
 
 ## Acceptance criteria for the first vertical slice
 
-- Creating a session against a valid core succeeds and exposes API version 1.
+- Creating a session against a valid core succeeds and exposes API version 3.
 - Two sequential `infer-cell` calls do not parse, expand, resolve, derive, or
   infer core a second time.
 - A caller-provided source ID appears unchanged in every returned span.
