@@ -1422,7 +1422,7 @@ binder, but it must not outlive the frame.")
          BorrowState))
   (sig analyze-call-args
        (Fn
-         [(Ref (Box MonoType))
+         [(Ref MonoType)
           (Ref (Array (Box SpecializedExpr)))
           (Ref BorrowState)
           (Ref (Array CoreRef))
@@ -1692,6 +1692,8 @@ values only — the syntactic borrow sources of the value expression.")
 
   (private check-unique-owner!)
   (hidden check-unique-owner!)
+  (private direct-parameter-reference)
+  (hidden direct-parameter-reference)
   (defn check-unique-owner! [owner argument-index args state parameters flags strict?]
     (when strict?
       (do
@@ -1699,18 +1701,19 @@ values only — the syntactic borrow sources of the value expression.")
           (Array.aset! flags 3 true))
         (for [j 0 (Array.length args)]
           (when (Int./= argument-index j)
-            (when (origin-contains-owner?
-                    &(origin-of
-                       (Box.peek (Array.unsafe-nth args j))
-                       state
-                       parameters)
-                    owner)
-              (Array.aset! flags 3 true)))))))
+            (let [other (Box.peek (Array.unsafe-nth args j))]
+              (when
+                (or
+                  (match (direct-parameter-reference other)
+                    (Maybe.Just reference) (CoreIR.same-ref? &reference owner)
+                    (Maybe.Nothing) false)
+                  (origin-contains-owner?
+                    &(origin-of other state parameters)
+                    owner))
+                (Array.aset! flags 3 true))))))))
 
   (private check-unique-call!)
   (hidden check-unique-call!)
-  (private direct-parameter-reference)
-  (hidden direct-parameter-reference)
   (defn direct-parameter-reference [argument]
     (match-ref argument
       (SpecializedExpr.Reference _ _ reference)
@@ -1756,7 +1759,7 @@ values only — the syntactic borrow sources of the value expression.")
               _ ()))))))
 
   (defn analyze-call-args [signature args state parameters facts flags]
-    (match-ref (Box.peek signature)
+    (match-ref signature
       (MonoType.Function arg-types _)
         (let-do [current @state
                  pending (the (Array CoreRef) [])
@@ -1911,7 +1914,7 @@ values only — the syntactic borrow sources of the value expression.")
             (when tail?
               (check-escape! &(origin-of expr &current parameters) flags))
             current)
-          (let-do [current (analyze-call-args signature
+          (let-do [current (analyze-call-args (Box.peek signature)
                                               args
                                               state
                                               parameters
@@ -1927,22 +1930,20 @@ values only — the syntactic borrow sources of the value expression.")
                                   parameters
                                   facts
                                   flags
-                                  false)
-                 n (Array.length args)]
+                                  false)]
           ;; invoking a closure uses every borrow its environment captured;
           ;; if any captured borrow's owner has been moved, this call dangles.
           (check-use-after-move!
             &(origin-of (Box.peek callee) &current parameters)
             &current
             flags)
-          (for [i 0 n]
-            (set! current
-                  (analyze (Box.peek (Array.unsafe-nth args i))
-                           &current
-                           parameters
-                           facts
-                           flags
-                           false)))
+          (let [signature (Specialize.expression-type (Box.peek callee))]
+            (set! current (analyze-call-args &signature
+                                             args
+                                             &current
+                                             parameters
+                                             facts
+                                             flags)))
           ;; Some derived/intrinsic calls retain the generic Call node even
           ;; though their callee is a statically known global reference. They
           ;; participate in the same propagated affine contract as GlobalCall.

@@ -237,9 +237,10 @@
     (implements delete Types.Widget.delete)))
 (defmodule Bindings
   (register make-widget (Fn [] Types.Widget) \"make_widget\" []))
-(defn owns-widget [] (let [widget (Bindings.make-widget)] ()))")
+(defn owns-widget [] (let [widget (Bindings.make-widget)] ()))
+(owns-widget)")
     (Result.Success plan)
-      (Int.> (Array.length (OwnershipPlan.actions &plan)) 0)
+      (Int.= 1 (count-deletes &plan))
     (Result.Error _) false))
 
 (defn accepts-calling-captured-function? []
@@ -585,6 +586,22 @@
 (defn bad [w] (mutate-and-inspect &w &w))
 (bad (make-widget))"))))
 
+(defn rejects-take-before-unique-of-same-owner? []
+  (Result.error?
+    &(prepare-source
+      &(String.append owned-widget-prelude
+                      "(register consume-and-mutate (Fn [Widget (Ref Widget)] ()) \"consume_and_mutate\" [take unique])
+(defn bad [w] (consume-and-mutate w &w))
+(bad (make-widget))"))))
+
+(defn rejects-unique-before-take-of-same-owner? []
+  (Result.error?
+    &(prepare-source
+      &(String.append owned-widget-prelude
+                      "(register mutate-and-consume (Fn [(Ref Widget) Widget] ()) \"mutate_and_consume\" [unique take])
+(defn bad [w] (mutate-and-consume &w w))
+(bad (make-widget))"))))
+
 (defn accepts-unique-foreign-call-after-alias-scope? []
   (Result.success?
     &(prepare-source
@@ -704,6 +721,15 @@
 (defn f [] (let [g (make-gauge) r &g] (do (take-gauge g) (read-gauge r))))
 (f)")))
 
+(defn rejects-owned-reuse-after-dynamic-closure-call? []
+  (Result.error?
+    &(prepare-source
+      &(String.append owned-widget-prelude
+                      "(defn bad []
+  (let [w (make-widget) consume-it (fn [x] ())]
+    (do (consume-it w) (inspect &w))))
+(bad)"))))
+
 (defn rejects-mutation-escape? []
   (Result.error?
     &(prepare-source
@@ -772,6 +798,12 @@
     (rejects-unique-foreign-call-with-overlapping-argument?)
     "a unique foreign borrow rejects another argument derived from the same owner")
   (assert-true t
+    (rejects-take-before-unique-of-same-owner?)
+    "a taken value cannot also be uniquely borrowed later in the same call")
+  (assert-true t
+    (rejects-unique-before-take-of-same-owner?)
+    "a unique borrow cannot also be taken later in the same call")
+  (assert-true t
     (accepts-unique-foreign-call-after-alias-scope?)
     "a unique foreign borrow is accepted once an earlier alias leaves scope")
   (assert-true t
@@ -834,6 +866,9 @@
   (assert-true t
     (accepts-unmanaged-borrow-after-pass?)
     "borrowing an unmanaged value and using it after passing it (a copy) is accepted")
+  (assert-true t
+    (rejects-owned-reuse-after-dynamic-closure-call?)
+    "passing an owned value to a dynamic closure moves it")
   (assert-true t
     (rejects-mutation-escape?)
     "a set! that repoints a returned reference at a local is rejected")
