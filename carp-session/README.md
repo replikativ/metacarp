@@ -57,8 +57,9 @@ strict deterministic CBOR with a four-byte big-endian length and imposes a
 transport has no dependency on JVM EDN or JSON conventions. Its `ownership`
 operation returns canonical CBOR maps containing concrete actions, normalized
 projected-place accesses, per-function affine summaries, reachable foreign
-contracts, specialization-context and expression IDs, resolved resources, and
-half-open UTF-8 source spans. Callers may supply a stable source ID with
+contracts, unsafe type mobility attestations, ownership-transfer requirements,
+specialization-context and expression IDs, resolved resources, and half-open
+UTF-8 source spans. Callers may supply a stable source ID with
 `upsert` so editor buffers can join the report without depending on protocol
 request IDs. `emit-library` returns a versioned map containing the C translation
 unit and one ownership report per requested root. Those reports are taken from

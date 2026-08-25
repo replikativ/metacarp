@@ -53,7 +53,9 @@
    actions (Array SpannedOwnershipAction)
    accesses (Array SpannedOwnershipAccess)
    summaries (Array OwnershipFunctionSummary)
-   foreign-contracts (Array OwnershipForeignContract)])
+   foreign-contracts (Array OwnershipForeignContract)
+   type-capabilities (Array CoreTypeCapability)
+   transfer-requirements (Array CoreTransferRequirement)])
 
 (deftype LibraryArtifact
   [c String
@@ -1499,7 +1501,9 @@ runtime, type, interface, implementation, template, and macro environments.")
                   (target-ownership-actions plan provenance &reference)
                   (target-ownership-accesses plan provenance &reference)
                   (target-ownership-summaries plan &reference)
-                  (ownership-foreign-contracts plan)))
+                  (ownership-foreign-contracts plan)
+                  (Array.copy (CoreModule.type-capabilities core))
+                  (Array.copy (CoreModule.transfer-requirements core))))
             (Maybe.Nothing) ())))
       reports))
 
@@ -1570,7 +1574,11 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                                                          &reference)
                                               (target-ownership-summaries &plan
                                                                           &reference)
-                                              (ownership-foreign-contracts &plan))))))))))
+                                              (ownership-foreign-contracts &plan)
+                                              (Array.copy
+                                                (CoreModule.type-capabilities &core))
+                                              (Array.copy
+                                                (CoreModule.transfer-requirements &core)))))))))))
 
   (private compatible-definition-kind?)
   (hidden compatible-definition-kind?)

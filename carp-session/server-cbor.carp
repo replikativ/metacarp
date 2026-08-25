@@ -272,10 +272,14 @@
            accesses (the (Array (Box CborValue)) [])
            summaries (the (Array (Box CborValue)) [])
            foreign-contracts (the (Array (Box CborValue)) [])
+           type-capabilities (the (Array (Box CborValue)) [])
+           transfer-requirements (the (Array (Box CborValue)) [])
            source-actions (OwnershipReport.actions report)
            source-accesses (OwnershipReport.accesses report)
            source-summaries (OwnershipReport.summaries report)
-           source-foreign-contracts (OwnershipReport.foreign-contracts report)]
+           source-foreign-contracts (OwnershipReport.foreign-contracts report)
+           source-type-capabilities (OwnershipReport.type-capabilities report)
+           source-transfer-requirements (OwnershipReport.transfer-requirements report)]
     (for [i 0 (Array.length source-actions)]
       (Array.push-back! &actions
                         (ownership-action-value
@@ -292,13 +296,38 @@
       (Array.push-back! &foreign-contracts
                         (ownership-foreign-contract-value
                           (Array.unsafe-nth source-foreign-contracts i))))
+    (for [i 0 (Array.length source-type-capabilities)]
+      (Array.push-back! &type-capabilities
+        (box-map
+          [(map-entry "type"
+             (box-text
+               (CoreTypeCapability.name
+                 (Array.unsafe-nth source-type-capabilities i))))
+           (map-entry "unsafe" (box-bool true))])))
+    (for [i 0 (Array.length source-transfer-requirements)]
+      (let-do [requirement (Array.unsafe-nth source-transfer-requirements i)
+               arguments (the (Array (Box CborValue)) [])]
+        (for [j 0 (Array.length (CoreTransferRequirement.arguments requirement))]
+          (Array.push-back! &arguments
+            (box-int
+              @(Array.unsafe-nth
+                (CoreTransferRequirement.arguments requirement)
+                j))))
+        (Array.push-back! &transfer-requirements
+          (box-map
+            [(map-entry "function"
+               (reference-value
+                 (CoreTransferRequirement.reference requirement)))
+             (map-entry "arguments" (box-values arguments))]))))
     (box-map
       [(map-entry "name" (box-text (OwnershipReport.name report)))
        (map-entry "scheme" (box-text (OwnershipReport.scheme report)))
        (map-entry "actions" (box-values actions))
        (map-entry "accesses" (box-values accesses))
        (map-entry "summaries" (box-values summaries))
-       (map-entry "foreign-contracts" (box-values foreign-contracts))])))
+       (map-entry "foreign-contracts" (box-values foreign-contracts))
+       (map-entry "type-capabilities" (box-values type-capabilities))
+       (map-entry "transfer-requirements" (box-values transfer-requirements))])))
 
 (defn library-artifact-value [artifact]
   (let-do [reports (the (Array (Box CborValue)) [])
