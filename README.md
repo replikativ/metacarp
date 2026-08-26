@@ -126,6 +126,13 @@ noise-sensitive CI timing threshold.
 
 The assurance harness keeps the self-host honest:
 
+CircleCI is the primary Linux topology in `.circleci/config.yml`: one cached
+bootstrap job supplies the pinned reference Carp checkout and style tools;
+the reference phase suite and self-host assurance then run in parallel; the
+fixed-point generation-2 compiler is passed through a workspace into the final
+phase-suite job. GitHub Actions retains the same Linux gates during the CI
+transition and the independent ARM64 macOS self-host lane.
+
 - `scripts/run-assurance.sh phase` runs lint and formatting before every
   phase/session suite. Set `CARP_SKIP_STYLE=1` when the two style tools are
   unavailable. Set `CARP_PHASE_JOBS=2` or `3` to run independent test groups
