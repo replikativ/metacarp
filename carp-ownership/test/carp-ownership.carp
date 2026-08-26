@@ -241,9 +241,8 @@
 (defn nested-facts-derivation? []
   (match (prepare-source "(defmodule Types
   (register-type Widget \"void*\")
-  (defmodule Widget
-    (register delete (Fn [Widget] ()) \"Widget_delete\" [take])
-    (implements delete Types.Widget.delete)))
+  (register destroy-widget (Fn [Widget] ()) \"Widget_delete\" [take])
+  (implements delete Types.destroy-widget))
 (defmodule Bindings
   (register make-widget (Fn [] Types.Widget) \"make_widget\" []))
 (defn owns-widget [] (let [widget (Bindings.make-widget)] ()))

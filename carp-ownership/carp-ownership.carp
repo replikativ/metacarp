@@ -296,32 +296,64 @@ generic-instance deleter's argument type can be keyed for ownership facts.")
                            (Box.init (resolved->mono (Box.peek ret))))
       (CoreType.Variable _) (MonoType.Variable 0)))
 
-  (private qualified-deleted-name)
-  (hidden qualified-deleted-name)
-  (defn qualified-deleted-name [name implementation]
-    (let [implementation-name (CoreRef.name implementation)
-          delete-suffix ".delete"]
-      (if (String.ends-with? implementation-name delete-suffix)
-        (let [owner-name (String.slice implementation-name 0
-                                       (- (String.length implementation-name)
-                                          (String.length delete-suffix)))
-              qualified-suffix (String.concat &[@"." (String.copy name)])]
-          (if (or (String.= &owner-name name)
-                  (String.ends-with? &owner-name &qualified-suffix))
-            owner-name
-            (String.copy name)))
-        (String.copy name))))
+  (private name-parent-scope)
+  (hidden name-parent-scope)
+  (defn name-parent-scope [name]
+    (let-do [last-dot -1]
+      (for [i 0 (String.length name)]
+        (when (Char.= (String.char-at name i) \.) (set! last-dot i)))
+      (if (Int.< last-dot 0)
+        (String.copy "")
+        (String.prefix name last-dot))))
+
+  (private declared-type-name?)
+  (hidden declared-type-name?)
+  (defn declared-type-name? [declarations name]
+    (let-do [found false]
+      (for [i 0 (Array.length declarations)]
+        (when (String.= (CoreTypeDeclaration.name
+                          (Array.unsafe-nth declarations i))
+                        name)
+          (set! found true)))
+      found))
+
+  (private canonical-deleted-name)
+  (hidden canonical-deleted-name)
+  (doc canonical-deleted-name "resolves a nominal name in the implementation's
+lexical module scopes against actual type declarations. This retains the
+canonical nested nominal identity without inferring it from a conventional
+deleter spelling such as `T.delete`.")
+  (defn canonical-deleted-name [name implementation declarations]
+    (if (declared-type-name? declarations name)
+      (String.copy name)
+      (let-do [scope (name-parent-scope (CoreRef.name implementation))
+               resolved (the (Maybe String) (Maybe.Nothing))]
+        (while (and (not (String.empty? &scope))
+                    (match-ref &resolved
+                      (Maybe.Just _) false
+                      (Maybe.Nothing) true))
+          (let [candidate (String.concat &[(String.copy &scope)
+                                            @"."
+                                            (String.copy name)])]
+            (if (declared-type-name? declarations &candidate)
+              (set! resolved (Maybe.Just candidate))
+              (set! scope (name-parent-scope &scope)))))
+        (match resolved
+          (Maybe.Just canonical) canonical
+          (Maybe.Nothing) (String.copy name)))))
 
   (private deleted-type-key)
   (hidden deleted-type-key)
-  (defn deleted-type-key [core-type implementation]
+  (defn deleted-type-key [core-type implementation declarations]
     (match-ref core-type
       (CoreType.String) (Maybe.Just (CAbi.type-key &(MonoType.String)))
       (CoreType.Named name arguments)
         (if (Int.= 0 (Array.length arguments))
           (Maybe.Just
             (CAbi.type-key
-              &(MonoType.Named (qualified-deleted-name name implementation) [])))
+              &(MonoType.Named
+                 (canonical-deleted-name name implementation declarations)
+                 [])))
           (Maybe.Just (CAbi.type-key &(resolved->mono core-type))))
       _ (Maybe.Nothing)))
 
@@ -408,7 +440,9 @@ deleters are polymorphic over each arity.")
             (match (signature-arg0 core (CoreImplementation.implementation im))
               (Maybe.Just arg0)
                 (match (deleted-type-key
-                         &arg0 (CoreImplementation.implementation im))
+                         &arg0
+                         (CoreImplementation.implementation im)
+                         declarations)
                   (Maybe.Just key)
                     (unless (has-key? &owned &key)
                       (set! owned (Array.push-back owned key)))
