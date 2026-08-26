@@ -1303,6 +1303,13 @@ its definition frame.")
                     (SurfaceNode.init @(SurfaceNode.span call)
                                       (SurfaceForm.Array items))))))
           (Result.Error error) (Maybe.Just (Result.Error error)))
+      ;; Dynamic Core uses `copy` while constructing syntax for copied map
+      ;; literal values. Compile-time values are persistent; returning the
+      ;; copied argument preserves the reference evaluator's observable value.
+      (or (named? head @"copy") (named? head @"Dynamic.copy"))
+        (match (value-at call values 0)
+          (Result.Success value) (Maybe.Just (Result.Success value))
+          (Result.Error error) (Maybe.Just (Result.Error error)))
       (named? head @"Symbol.from")
         (match (value-at call values 0)
           (Result.Success value) (Maybe.Just (symbol-from-value call &value))
