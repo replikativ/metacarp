@@ -120,6 +120,22 @@ jobs:
             CARP_PHASE_COMPILER="$PWD/out/fixed-point/carp-compiler-gen2" \
               ./scripts/run-assurance.sh phase-self
 
+  bootstrap-asset:
+    executor: linux
+    steps:
+      - attach-bootstrap
+      - run:
+          name: Build and verify source-only bootstrap asset
+          no_output_timeout: 30m
+          command: |
+            CARP_FIXED_POINT_OUT="$PWD/out/fixed-point" \
+            CARP_ROOT="$HOME/.carp-src" \
+              ./scripts/build-bootstrap-bundle.sh
+            ./scripts/verify-bootstrap-bundle.sh out/release/*.tar.gz
+      - store_artifacts:
+          path: out/release
+          destination: bootstrap
+
 workflows:
   compiler-assurance:
     jobs:
@@ -129,4 +145,6 @@ workflows:
       - self-host:
           requires: [bootstrap]
       - phase-generation-2:
+          requires: [self-host]
+      - bootstrap-asset:
           requires: [self-host]
