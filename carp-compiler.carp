@@ -4,6 +4,7 @@
 (load "carp-infer/carp-infer.carp")
 (load "carp-specialize/carp-specialize.carp")
 (load "carp-ownership/carp-ownership.carp")
+(load "carp-memory/carp-memory.carp")
 (load "carp-backend/carp-backend.carp")
 
 (doc Derive "generates memberwise `delete` and `copy` implementations for

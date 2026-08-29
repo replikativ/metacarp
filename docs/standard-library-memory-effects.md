@@ -249,6 +249,16 @@ optimization to work” is not allocation authority.
 
 ## Implementation order
 
+The first compiler slice now implements steps 1 and 2: the specialized-Core
+allocation walker lives in `carp-memory`, and every primitive registry entry
+carries a structured direct manifest. Known allocation, resize, free, and
+no-effect cases are declared beside their lowering; unresolved interfaces and
+templates remain explicitly `Unknown`. The session allocation report now
+interprets `ArgumentElements` from these manifests instead of matching stable
+primitive IDs. This is direct-effect infrastructure only: a checked empty
+manifest does not become a transitive `noalloc` proof until step 4 accounts for
+ordinary callees, callbacks, and template dependencies.
+
 1. Move the experimental allocation walker out of `carp-session` into a
    dedicated compiler memory-analysis module.
 2. Add structured effect manifests to compiler primitives and templates.

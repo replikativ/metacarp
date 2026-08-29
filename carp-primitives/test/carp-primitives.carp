@@ -126,6 +126,50 @@
         (contains-text? (Pair.b &template) ": CARP_MALLOC"))
     (Maybe.Nothing) false))
 
+(defn structured-memory-manifests? []
+  (let [entries (PrimitiveRegistry.specs)
+        allocate (PrimitiveSpec.memory (spec-by-id &entries 14))
+        grow (PrimitiveSpec.memory (spec-by-id &entries 25))
+        box-init (PrimitiveSpec.memory (spec-by-id &entries 67))
+        box-unbox (PrimitiveSpec.memory (spec-by-id &entries 4))
+        index (PrimitiveSpec.memory (spec-by-id &entries 11))
+        interface (PrimitiveSpec.memory (spec-by-id &entries 0))]
+    (and
+      (match-ref (Array.unsafe-nth (PrimitiveMemoryManifest.effects allocate) 0)
+        (PrimitiveMemoryEffect.Allocate extent)
+          (match-ref extent
+            (PrimitiveMemoryExtent.ArgumentElements argument) (Int.= @argument 0)
+            _ false)
+        _ false)
+      (and
+        (match-ref (Array.unsafe-nth (PrimitiveMemoryManifest.effects grow) 0)
+          (PrimitiveMemoryEffect.Resize argument _ may-move)
+            (and (Int.= @argument 0) @may-move)
+          _ false)
+        (and
+          (and (Int.= 1 (Array.length (PrimitiveMemoryManifest.invalidates grow)))
+               (Int.= 0 @(Array.unsafe-nth
+                            (PrimitiveMemoryManifest.invalidates grow) 0)))
+          (and
+            (match-ref (Array.unsafe-nth
+                         (PrimitiveMemoryManifest.effects box-init) 0)
+              (PrimitiveMemoryEffect.Allocate extent)
+                (match-ref extent
+                  (PrimitiveMemoryExtent.ExactElements count) (Int.= @count 1)
+                  _ false)
+              _ false)
+            (and
+              (match-ref (Array.unsafe-nth
+                           (PrimitiveMemoryManifest.effects box-unbox) 0)
+                (PrimitiveMemoryEffect.Free argument) (Int.= @argument 0)
+                _ false)
+              (and
+                (Int.= 0 (Array.length (PrimitiveMemoryManifest.effects index)))
+                (match-ref (Array.unsafe-nth
+                             (PrimitiveMemoryManifest.effects interface) 0)
+                  (PrimitiveMemoryEffect.Unknown) true
+                  _ false)))))))))
+
 (deftest t
   (assert-true t
     (stable-registry-shape?)
@@ -147,4 +191,7 @@
     "registry validation rejects duplicate IDs and names")
   (assert-true t
     (array-growth-allocates-null-storage?)
-    "growing a NULL-backed array records its first allocation"))
+    "growing a NULL-backed array records its first allocation")
+  (assert-true t
+    (structured-memory-manifests?)
+    "primitive manifests separate allocation, relocation, free, no-effect, and unknown"))
