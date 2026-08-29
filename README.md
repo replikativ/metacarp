@@ -257,6 +257,11 @@ language changes from compiler-correctness and hosting work, maps its affine
 contracts to Rust, and records the deliberately weaker parts of that mapping.
 [`docs/rust-affine-interop.md`](docs/rust-affine-interop.md) contains the
 lower-level ownership design.
+[`docs/allocator-parametric-memory.md`](docs/allocator-parametric-memory.md)
+extends it with allocator/storage-handler provenance, accounting, world-fork,
+and OS-memory laws. [`docs/standard-library-memory-effects.md`](docs/standard-library-memory-effects.md)
+applies those laws to Core and records the Zig, TigerBeetle, Valhalla,
+JVMCI/Graal, and future kernel-backend implications.
 
 ## Limitations
 
