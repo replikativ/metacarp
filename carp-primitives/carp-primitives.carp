@@ -30,38 +30,12 @@
   (Intrinsic [])
   (ParameterizedTemplate [PrimitiveTemplate]))
 
-(doc PrimitiveMemoryExtent "describes the quantity of one primitive memory
-operation without pretending target ABI sizes are known. `ArgumentElements`
-uses a call argument as the element count; `Unknown` is conservative.")
-(deftype PrimitiveMemoryExtent
-  (ExactElements [Int])
-  (ArgumentElements [Int])
-  (Unknown []))
-
-(doc PrimitiveMemoryEffect "is a backend-neutral direct effect of a primitive.
-Resize and Free identify the owning call argument. `may-move` makes loan
-invalidation explicit and is independent of logical ownership movement.")
-(deftype PrimitiveMemoryEffect
-  (Allocate [PrimitiveMemoryExtent])
-  (Resize [Int PrimitiveMemoryExtent Bool])
-  (Free [Int])
-  (Unknown []))
-
-(doc PrimitiveMemoryManifest "records direct primitive effects. An empty
-effect array is a checked no-memory-effect claim; Unknown prevents noalloc and
-bounded-capacity proofs. `invalidates` contains call argument indices whose
-derived loans may be invalidated.")
-(deftype PrimitiveMemoryManifest
-  [effects (Array PrimitiveMemoryEffect)
-   invalidates (Array Int)
-   evidence String])
-
 (deftype PrimitiveSpec
   [reference CoreRef
    signature (Box CoreType)
    phase PrimitivePhase
    lowering PrimitiveLowering
-   memory PrimitiveMemoryManifest])
+   memory CoreMemoryManifest])
 
 (deftype PrimitiveRegistryError [message String])
 
@@ -96,26 +70,26 @@ demands raised outside resolution (e.g. top-level result echo).")
   (defn function [arguments result]
     (CoreType.Function arguments (Box.init result)))
 
-  (defn no-memory [] (PrimitiveMemoryManifest.init [] [] (String.copy "checked")))
+  (defn no-memory [] (CoreMemoryManifest.init [] [] (String.copy "checked")))
 
   (defn unknown-memory []
-    (PrimitiveMemoryManifest.init [(PrimitiveMemoryEffect.Unknown)]
+    (CoreMemoryManifest.init [(CoreMemoryEffect.Unknown)]
                                   []
                                   (String.copy "unknown")))
 
   (defn allocating [extent]
-    (PrimitiveMemoryManifest.init
-      [(PrimitiveMemoryEffect.Allocate extent)] [] (String.copy "declared")))
+    (CoreMemoryManifest.init
+      [(CoreMemoryEffect.Allocate extent)] [] (String.copy "declared")))
 
   (defn resizing [argument extent may-move]
-    (PrimitiveMemoryManifest.init
-      [(PrimitiveMemoryEffect.Resize argument extent may-move)]
+    (CoreMemoryManifest.init
+      [(CoreMemoryEffect.Resize argument extent may-move)]
       (if may-move [argument] [])
       (String.copy "declared")))
 
   (defn freeing [argument]
-    (PrimitiveMemoryManifest.init
-      [(PrimitiveMemoryEffect.Free argument)] [] (String.copy "declared")))
+    (CoreMemoryManifest.init
+      [(CoreMemoryEffect.Free argument)] [] (String.copy "declared")))
 
   (defn interface-spec [id name signature]
     (PrimitiveSpec.init (reference id name)
@@ -171,14 +145,14 @@ demands raised outside resolution (e.g. top-level result echo).")
       (function
         [(Box.init (array-of-a)) (Box.init (variable "a"))]
         (array-of-a))
-      (resizing 0 (PrimitiveMemoryExtent.Unknown) true)))
+      (resizing 0 (CoreMemoryExtent.Unknown) true)))
   (defn tpl-push-back-mut [id name]
     (builtin-memory-spec
       id name
       (function
         [(Box.init (ref-array-of-a)) (Box.init (variable "a"))]
         (CoreType.Unit))
-      (resizing 0 (PrimitiveMemoryExtent.Unknown) true)))
+      (resizing 0 (CoreMemoryExtent.Unknown) true)))
   (defn tpl-pop-back [id name]
     (builtin-spec id name (function [(Box.init (array-of-a))] (array-of-a))))
   (defn tpl-aset [id name]
@@ -232,7 +206,7 @@ demands raised outside resolution (e.g. top-level result echo).")
              (named-one collection-name (variable "a"))))]
         (CoreType.String))
       template
-      (allocating (PrimitiveMemoryExtent.Unknown))))
+      (allocating (CoreMemoryExtent.Unknown))))
 
   (defn copy-interface []
     (interface-spec 0
@@ -282,7 +256,7 @@ demands raised outside resolution (e.g. top-level result echo).")
       67 "Box.init"
       (function [(Box.init (variable "a"))]
                 (named-one "Box" (variable "a")))
-      (allocating (PrimitiveMemoryExtent.ExactElements 1))))
+      (allocating (CoreMemoryExtent.ExactElements 1))))
 
   (defn box-peek []
     (builtin-spec 68
@@ -301,7 +275,7 @@ demands raised outside resolution (e.g. top-level result echo).")
       ;; elements render through `prn` like the reference
       ;; (StructUtils/ArrayTemplates dispatch "prn" for members).
       (PrimitiveTemplate.BoxStr (reference 2 "prn"))
-      (allocating (PrimitiveMemoryExtent.Unknown))))
+      (allocating (CoreMemoryExtent.Unknown))))
 
   ;; length instances need real bodies when referenced as values (e.g.
   ;; `&Array.length` passed to copy-map); call sites still inline `.len`.
@@ -370,7 +344,7 @@ demands raised outside resolution (e.g. top-level result echo).")
       id name
       (function [(Box.init (CoreType.Integer))]
                 (named-one "Array" (variable "a")))
-      (allocating (PrimitiveMemoryExtent.ArgumentElements 0))))
+      (allocating (CoreMemoryExtent.ArgumentElements 0))))
 
   (defn generic-set [id name]
     (builtin-spec id
@@ -416,7 +390,7 @@ demands raised outside resolution (e.g. top-level result echo).")
       (function
         [(Box.init (array-of-a)) (Box.init (variable "a"))]
         (array-of-a))
-      (resizing 0 (PrimitiveMemoryExtent.Unknown) true)))
+      (resizing 0 (CoreMemoryExtent.Unknown) true)))
 
   (defn generic-push-mut [id name]
     (builtin-memory-spec
@@ -424,7 +398,7 @@ demands raised outside resolution (e.g. top-level result echo).")
       (function
         [(Box.init (ref-array-of-a)) (Box.init (variable "a"))]
         (CoreType.Unit))
-      (resizing 0 (PrimitiveMemoryExtent.Unknown) true)))
+      (resizing 0 (CoreMemoryExtent.Unknown) true)))
 
   (defn generic-pop [id name]
     (builtin-spec id name (function [(Box.init (array-of-a))] (array-of-a))))
@@ -526,9 +500,9 @@ demands raised outside resolution (e.g. top-level result echo).")
       template
       (cond
         (String.= container-name "Array")
-          (allocating (PrimitiveMemoryExtent.Unknown))
+          (allocating (CoreMemoryExtent.Unknown))
         (String.= container-name "Box")
-          (allocating (PrimitiveMemoryExtent.ExactElements 1))
+          (allocating (CoreMemoryExtent.ExactElements 1))
         (no-memory))))
 
   (defn pair-copy [id name template]
@@ -558,7 +532,7 @@ demands raised outside resolution (e.g. top-level result echo).")
           [(Box.init (reference-type (function-type arity)))]
           (function-type arity))
         (PrimitiveTemplate.FunctionCopy arity)
-        (allocating (PrimitiveMemoryExtent.Unknown)))))
+        (allocating (CoreMemoryExtent.Unknown)))))
 
   (defn function-delete-spec [arity]
     (let [name (String.concat &[@"Function.Arity" (Int.str arity) @".delete"])]
@@ -581,7 +555,7 @@ demands raised outside resolution (e.g. top-level result echo).")
           [(Box.init (reference-type (function-type arity)))]
           (CoreType.String))
         (PrimitiveTemplate.FunctionStr)
-        (allocating (PrimitiveMemoryExtent.Unknown)))))
+        (allocating (CoreMemoryExtent.Unknown)))))
 
   (defn base-specs []
     [(copy-interface)
@@ -787,8 +761,10 @@ prefers this source payload over the spec's intrinsic lowering.")
                                 (CoreBuiltinSource.init @(PrimitiveSpec.reference spec)
                                                         (Box.init
                                                           @(Box.peek (PrimitiveSpec.signature spec)))
-                                                        (CoreBuiltinPayload.Template @(Pair.a &dc)
-                                                                                     @(Pair.b &dc))))
+                                                        (CoreBuiltinPayload.Template
+                                                          @(Pair.a &dc)
+                                                          @(Pair.b &dc)
+                                                          @(PrimitiveSpec.memory spec))))
             (Maybe.Nothing) ())))
       result))
 
@@ -904,7 +880,7 @@ prefers this source payload over the spec's intrinsic lowering.")
 compiler primitive. Calls through interfaces must be resolved to their
 implementation before this query can support a noalloc proof.")
   (defn memory-for [reference]
-    (let-do [result (the (Maybe PrimitiveMemoryManifest) (Maybe.Nothing))
+    (let-do [result (the (Maybe CoreMemoryManifest) (Maybe.Nothing))
              entries (specs)
              n (Array.length &entries)]
       (for [i 0 n]

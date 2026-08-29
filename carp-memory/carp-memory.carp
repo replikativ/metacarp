@@ -31,7 +31,7 @@ expression that causes it. The primitive effect retains call-argument extent
 information; `source` identifies an IR construct or resolved primitive.")
 (deftype MemoryEffectSite
   [site OwnershipSite
-   effect PrimitiveMemoryEffect
+   effect CoreMemoryEffect
    source String
    span (Maybe SourceSpan)])
 
@@ -172,12 +172,12 @@ interpretations.")
           ;; vocabulary also tells us which argument carries the element count.
           (match (PrimitiveRegistry.memory-for reference)
             (Maybe.Just manifest)
-              (let [effects (PrimitiveMemoryManifest.effects &manifest)]
+              (let [effects (CoreMemoryManifest.effects &manifest)]
                 (for [effect-index 0 (Array.length effects)]
                   (match-ref (Array.unsafe-nth effects effect-index)
-                    (PrimitiveMemoryEffect.Allocate extent)
+                    (CoreMemoryEffect.Allocate extent)
                       (match-ref extent
-                        (PrimitiveMemoryExtent.ArgumentElements argument-index)
+                        (CoreMemoryExtent.ArgumentElements argument-index)
                           (match (array-element-name (Box.peek type))
                             (Maybe.Just element)
                               (let [count (if
@@ -291,7 +291,7 @@ the registry manifest, not through resolver IDs or generated C spelling.")
     (Array.push-back! effects
       (MemoryEffectSite.init
         (OwnershipSite.init context id)
-        (PrimitiveMemoryEffect.copy effect)
+        (CoreMemoryEffect.copy effect)
         (String.copy source)
         (CoreProvenance.node-span provenance id))))
 
@@ -307,17 +307,42 @@ the registry manifest, not through resolver IDs or generated C spelling.")
 
   (private append-manifest!)
   (hidden append-manifest!)
-  (defn append-manifest! [manifest context id source provenance effects unresolved]
-    (let [declared (PrimitiveMemoryManifest.effects manifest)]
+  (defn append-manifest! [manifest context id source unknown-reason
+                          provenance effects unresolved]
+    (let [declared (CoreMemoryManifest.effects manifest)]
       (for [i 0 (Array.length declared)]
         (let [effect (Array.unsafe-nth declared i)]
           (do
             (append-effect-site! effects effect context id source provenance)
             (match-ref effect
-              (PrimitiveMemoryEffect.Unknown)
+              (CoreMemoryEffect.Unknown)
                 (append-unresolved! unresolved context id source
-                                    "primitive-manifest-unknown" provenance)
+                                    unknown-reason provenance)
               _ ()))))))
+
+  (private source-memory-for)
+  (hidden source-memory-for)
+  (defn source-memory-for [specialized reference signature]
+    (let-do [result (the (Maybe CoreMemoryManifest) (Maybe.Nothing))
+             primitives (SpecializationModule.primitives specialized)]
+      (for [i 0 (Array.length primitives)]
+        (let [primitive (Array.unsafe-nth primitives i)
+              specialization (SpecializedPrimitive.specialization primitive)]
+          (when (and
+              (CoreIR.same-ref? (Specialization.reference specialization)
+                                reference)
+              (Type.same-representation?
+                (Box.peek (Specialization.signature specialization))
+                signature))
+            (match-ref (SpecializedPrimitive.source primitive)
+              (Maybe.Just source)
+                (match-ref (SpecializedBuiltinSource.payload source)
+                  (CoreBuiltinPayload.External _ _ memory)
+                    (set! result (Maybe.Just @memory))
+                  (CoreBuiltinPayload.Template _ _ memory)
+                    (set! result (Maybe.Just @memory)))
+              (Maybe.Nothing) ()))))
+      result))
 
   (private collect-summary!)
   (hidden collect-summary!)
@@ -357,8 +382,8 @@ the registry manifest, not through resolver IDs or generated C spelling.")
       (SpecializedExpr.ArrayLit id _ elements)
         (do
           (when-do (Int.> (Array.length elements) 0)
-            (let [effect (PrimitiveMemoryEffect.Allocate
-                           (PrimitiveMemoryExtent.ExactElements
+            (let [effect (CoreMemoryEffect.Allocate
+                           (CoreMemoryExtent.ExactElements
                              (Array.length elements)))]
               (append-effect-site! effects &effect context @id
                                    "array-literal" provenance)))
@@ -369,8 +394,8 @@ the registry manifest, not through resolver IDs or generated C spelling.")
           (collect-summary-array! arguments specialized provenance context
                                   effects calls unresolved)
           (if (String.starts-with? symbol "_carp_closure_")
-            (let [effect (PrimitiveMemoryEffect.Allocate
-                           (PrimitiveMemoryExtent.Unknown))]
+            (let [effect (CoreMemoryEffect.Allocate
+                           (CoreMemoryExtent.Unknown))]
               (append-effect-site! effects &effect context @id
                                    "closure-environment" provenance))
             (let [target (summary-body-index
@@ -387,13 +412,27 @@ the registry manifest, not through resolver IDs or generated C spelling.")
                 (match (PrimitiveRegistry.memory-for reference)
                   (Maybe.Just manifest)
                     (append-manifest! &manifest context @id
-                                      (CoreRef.name reference) provenance
+                                      (CoreRef.name reference)
+                                      "primitive-manifest-unknown" provenance
                                       effects unresolved)
                   (Maybe.Nothing)
-                    (append-unresolved! unresolved context @id
-                                        (CoreRef.name reference)
-                                        "unannotated-foreign-or-template"
-                                        provenance))))))
+                    (match (source-memory-for specialized reference
+                              (Box.peek signature))
+                      (Maybe.Just manifest)
+                        (let [reason
+                               (if (String.=
+                                   (CoreMemoryManifest.evidence &manifest)
+                                   "omitted")
+                                 (String.copy "memory-contract-omitted")
+                                 (String.copy "source-memory-contract-unknown"))]
+                          (append-manifest! &manifest context @id
+                                            (CoreRef.name reference) &reason
+                                            provenance effects unresolved))
+                      (Maybe.Nothing)
+                        (append-unresolved! unresolved context @id
+                                            (CoreRef.name reference)
+                                            "unannotated-foreign-or-template"
+                                            provenance)))))))
       (SpecializedExpr.Call id _ callee arguments)
         (do
           (collect-summary! (Box.peek callee) specialized provenance context
@@ -458,28 +497,28 @@ the registry manifest, not through resolver IDs or generated C spelling.")
     (let-do [found false]
       (for [i 0 (Array.length effects)]
         (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
-          (PrimitiveMemoryEffect.Allocate _) (set! found true)
+          (CoreMemoryEffect.Allocate _) (set! found true)
           _ ()))
       found))
   (defn summary-has-resize? [effects]
     (let-do [found false]
       (for [i 0 (Array.length effects)]
         (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
-          (PrimitiveMemoryEffect.Resize _ _ _) (set! found true)
+          (CoreMemoryEffect.Resize _ _ _) (set! found true)
           _ ()))
       found))
   (defn summary-has-free? [effects]
     (let-do [found false]
       (for [i 0 (Array.length effects)]
         (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
-          (PrimitiveMemoryEffect.Free _) (set! found true)
+          (CoreMemoryEffect.Free _) (set! found true)
           _ ()))
       found))
   (defn summary-has-unknown? [effects]
     (let-do [found false]
       (for [i 0 (Array.length effects)]
         (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
-          (PrimitiveMemoryEffect.Unknown) (set! found true)
+          (CoreMemoryEffect.Unknown) (set! found true)
           _ ()))
       found))
 

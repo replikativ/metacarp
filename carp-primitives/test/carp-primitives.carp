@@ -135,46 +135,46 @@
         index (PrimitiveSpec.memory (spec-by-id &entries 11))
         interface (PrimitiveSpec.memory (spec-by-id &entries 0))]
     (and
-      (match-ref (Array.unsafe-nth (PrimitiveMemoryManifest.effects allocate) 0)
-        (PrimitiveMemoryEffect.Allocate extent)
+      (match-ref (Array.unsafe-nth (CoreMemoryManifest.effects allocate) 0)
+        (CoreMemoryEffect.Allocate extent)
           (match-ref extent
-            (PrimitiveMemoryExtent.ArgumentElements argument) (Int.= @argument 0)
+            (CoreMemoryExtent.ArgumentElements argument) (Int.= @argument 0)
             _ false)
         _ false)
       (and
-        (match-ref (Array.unsafe-nth (PrimitiveMemoryManifest.effects grow) 0)
-          (PrimitiveMemoryEffect.Resize argument _ may-move)
+        (match-ref (Array.unsafe-nth (CoreMemoryManifest.effects grow) 0)
+          (CoreMemoryEffect.Resize argument _ may-move)
             (and (Int.= @argument 0) @may-move)
           _ false)
         (and
-          (and (Int.= 1 (Array.length (PrimitiveMemoryManifest.invalidates grow)))
+          (and (Int.= 1 (Array.length (CoreMemoryManifest.invalidates grow)))
                (Int.= 0 @(Array.unsafe-nth
-                            (PrimitiveMemoryManifest.invalidates grow) 0)))
+                            (CoreMemoryManifest.invalidates grow) 0)))
           (and
             (match-ref (Array.unsafe-nth
-                         (PrimitiveMemoryManifest.effects box-init) 0)
-              (PrimitiveMemoryEffect.Allocate extent)
+                         (CoreMemoryManifest.effects box-init) 0)
+              (CoreMemoryEffect.Allocate extent)
                 (match-ref extent
-                  (PrimitiveMemoryExtent.ExactElements count) (Int.= @count 1)
+                  (CoreMemoryExtent.ExactElements count) (Int.= @count 1)
                   _ false)
               _ false)
             (and
               (match-ref (Array.unsafe-nth
-                           (PrimitiveMemoryManifest.effects box-unbox) 0)
-                (PrimitiveMemoryEffect.Free argument) (Int.= @argument 0)
+                           (CoreMemoryManifest.effects box-unbox) 0)
+                (CoreMemoryEffect.Free argument) (Int.= @argument 0)
                 _ false)
               (and
-                (Int.= 0 (Array.length (PrimitiveMemoryManifest.effects index)))
+                (Int.= 0 (Array.length (CoreMemoryManifest.effects index)))
                 (match-ref (Array.unsafe-nth
-                             (PrimitiveMemoryManifest.effects interface) 0)
-                  (PrimitiveMemoryEffect.Unknown) true
+                             (CoreMemoryManifest.effects interface) 0)
+                  (CoreMemoryEffect.Unknown) true
                   _ false)))))))))
 
 (defn higher-order-primitives-remain-unknown? []
   (let [entries (PrimitiveRegistry.specs)
         memory (PrimitiveSpec.memory (spec-by-id &entries 39))]
-    (match-ref (Array.unsafe-nth (PrimitiveMemoryManifest.effects memory) 0)
-      (PrimitiveMemoryEffect.Unknown) true
+    (match-ref (Array.unsafe-nth (CoreMemoryManifest.effects memory) 0)
+      (CoreMemoryEffect.Unknown) true
       _ false)))
 
 (deftest t

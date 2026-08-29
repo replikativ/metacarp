@@ -241,7 +241,7 @@ reflift wrapper's binding type, which would mislabel the result.")
                           (match-ref (SpecializedPrimitive.source primitive)
                             (Maybe.Just source)
                               (match-ref (SpecializedBuiltinSource.payload source)
-                                (CoreBuiltinPayload.External _ _)
+                                (CoreBuiltinPayload.External _ _ _)
                                 ;; a `register`ed external is declared by an
                                 ;; included header; mark it so `prototype`
                                 ;; skips emitting a (conflicting) declaration.
@@ -251,7 +251,7 @@ reflift wrapper's binding type, which would mislabel the result.")
                                   (Maybe.Just
                                     (String.copy (Specialization.symbol instance))))
                                 (CoreBuiltinPayload.Template source-declaration
-                                                             source-body)
+                                                             source-body _)
                                 (BackendDeclaration.SourceTemplate
                                   (String.copy (Specialization.symbol instance))
                                   @(Specialization.signature instance)

@@ -450,7 +450,7 @@
                         (match-ref (SpecializedPrimitive.source primitive)
                           (Maybe.Just source)
                             (match-ref (SpecializedBuiltinSource.payload source)
-                              (CoreBuiltinPayload.External external-name _)
+                              (CoreBuiltinPayload.External external-name _ _)
                                 (match-ref external-name
                                   (Maybe.Just name)
                                     (when (and (= name "external_inc")
@@ -458,7 +458,7 @@
                                                   "external_inc"))
                                       (set! found-external true))
                                   (Maybe.Nothing) ())
-                              (CoreBuiltinPayload.Template declaration body)
+                              (CoreBuiltinPayload.Template declaration body _)
                                 (when (and (= declaration "int $NAME(int x)")
                                            (and (= body "$DECL { return x; }")
                                                 (= (Specialization.symbol instance)

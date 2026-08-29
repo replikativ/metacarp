@@ -565,7 +565,11 @@
 (defn memory-alloc-leaf [] [1 2])
 (defn memory-alloc-root [] (memory-alloc-leaf))
 (register memory-opaque (Fn [] Int) \"memory_opaque\")
-(defn memory-unknown-root [] (memory-opaque))"))]
+(defn memory-unknown-root [] (memory-opaque))
+(register memory-pure-foreign (Fn [] Int) \"memory_pure_foreign\" [] [])
+(defn memory-foreign-pure-root [] (memory-pure-foreign))
+(register memory-alloc-foreign (Fn [] Int) \"memory_alloc_foreign\" [] [(allocate unknown)])
+(defn memory-foreign-alloc-root [] (memory-alloc-foreign))"))]
         (match (Session.upsert-input &session &source)
           (Result.Error diagnostic) (diagnostic-false &diagnostic)
           (Result.Success _)
@@ -598,6 +602,26 @@
                       (memory-summary-matches?
                         summaries "memory-unknown-root" false false false true)
                       (set! ok false)))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-foreign-pure-root")
+                (Result.Success report)
+                  (unless
+                    (memory-summary-matches?
+                      (OwnershipRegionReport.memory-summaries &report)
+                      "memory-foreign-pure-root" false false false false)
+                    (set! ok false))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-foreign-alloc-root")
+                (Result.Success report)
+                  (unless
+                    (memory-summary-matches?
+                      (OwnershipRegionReport.memory-summaries &report)
+                      "memory-foreign-alloc-root" true false false false)
+                    (set! ok false))
                 (Result.Error diagnostic)
                   (set! ok (diagnostic-false &diagnostic)))
               ok)))

@@ -307,7 +307,7 @@ answer") (Result.Success module)
                (for [i 0 (Array.length sources)]
                  (match-ref (CoreBuiltinSource.payload (Array.unsafe-nth sources
                                                                          i))
-                   (CoreBuiltinPayload.Template declaration body)
+                   (CoreBuiltinPayload.Template declaration body _)
                      (when (and (= declaration "$a $NAME(int x)")
                                 (= body "$DECL { return x; }"))
                        (set! found true))
@@ -359,7 +359,7 @@ answer") (Result.Success module)
                found false]
         (for [i 0 (Array.length sources)]
           (match-ref (CoreBuiltinSource.payload (Array.unsafe-nth sources i))
-            (CoreBuiltinPayload.External external-name _)
+            (CoreBuiltinPayload.External external-name _ _)
               (match-ref external-name
                 (Maybe.Just name)
                   (when (= name "external_inc") (set! found true))
@@ -375,7 +375,7 @@ answer") (Result.Success module)
                sources (CoreModule.builtin-sources &module)]
         (for [i 0 (Array.length sources)]
           (match-ref (CoreBuiltinSource.payload (Array.unsafe-nth sources i))
-            (CoreBuiltinPayload.External _ contract)
+            (CoreBuiltinPayload.External _ contract _)
               (match-ref contract
                 (Maybe.Just modes)
                   (when (and (Int.= 2 (Array.length modes))
@@ -391,6 +391,92 @@ answer") (Result.Success module)
             _ ()))
         found)
     (Result.Error _) false))
+
+(defn builtin-memory-contract-for [module name]
+  (let-do [result (the (Maybe CoreMemoryManifest) (Maybe.Nothing))
+           sources (CoreModule.builtin-sources module)]
+    (for [i 0 (Array.length sources)]
+      (let [source (Array.unsafe-nth sources i)]
+        (when (= (CoreRef.name (CoreBuiltinSource.reference source)) name)
+          (match-ref (CoreBuiltinSource.payload source)
+            (CoreBuiltinPayload.External _ _ memory)
+              (set! result (Maybe.Just @memory))
+            (CoreBuiltinPayload.Template _ _ memory)
+              (set! result (Maybe.Just @memory))))))
+    result))
+
+(defn resolves-explicit-memory-contracts? []
+  (match (resolve-source
+      "(register reserve (Fn [Int (Ref Int)] ()) \"reserve\" [copy unique] [(allocate (argument-elements 0)) (resize 1 (exact-elements 4) true) (free 1)])
+(deftemplate make-one (Fn [Int] Int) \"int $NAME(int x)\" \"$DECL { return x; }\" [(allocate (exact-elements 1))])")
+    (Result.Success module)
+      (match (builtin-memory-contract-for &module "reserve")
+        (Maybe.Nothing) false
+        (Maybe.Just register-memory)
+          (match (builtin-memory-contract-for &module "make-one")
+            (Maybe.Nothing) false
+            (Maybe.Just template-memory)
+              (let [register-effects (CoreMemoryManifest.effects &register-memory)
+                    template-effects (CoreMemoryManifest.effects &template-memory)]
+                (and
+                  (= (CoreMemoryManifest.evidence &register-memory) "declared")
+                  (and
+                    (Int.= 3 (Array.length register-effects))
+                    (and
+                      (Int.= 1
+                        (Array.length
+                          (CoreMemoryManifest.invalidates &register-memory)))
+                      (and
+                        (Int.= 1
+                          @(Array.unsafe-nth
+                            (CoreMemoryManifest.invalidates &register-memory) 0))
+                        (and
+                          (match-ref (Array.unsafe-nth register-effects 0)
+                            (CoreMemoryEffect.Allocate extent)
+                              (match-ref extent
+                                (CoreMemoryExtent.ArgumentElements argument)
+                                  (Int.= @argument 0)
+                                _ false)
+                            _ false)
+                          (match-ref (Array.unsafe-nth template-effects 0)
+                            (CoreMemoryEffect.Allocate extent)
+                              (match-ref extent
+                                (CoreMemoryExtent.ExactElements count)
+                                  (Int.= @count 1)
+                                _ false)
+                            _ false)))))))))
+    (Result.Error _) false))
+
+(defn omitted-memory-contracts-stay-unknown? []
+  (match (resolve-source "(register opaque (Fn [] Int) \"opaque\")")
+    (Result.Success module)
+      (match (builtin-memory-contract-for &module "opaque")
+        (Maybe.Just memory)
+          (and
+            (= (CoreMemoryManifest.evidence &memory) "omitted")
+            (match-ref (Array.unsafe-nth
+                         (CoreMemoryManifest.effects &memory) 0)
+              (CoreMemoryEffect.Unknown) true
+              _ false))
+        (Maybe.Nothing) false)
+    (Result.Error _) false))
+
+(defn rejects-invalid-memory-contracts? []
+  (and
+    (Result.error?
+      &(resolve-source
+         "(register mixed (Fn [] Int) \"mixed\" [] [unknown (allocate unknown)])"))
+    (and
+      (Result.error?
+        &(resolve-source
+           "(register out-of-range (Fn [Int] Int) \"bad\" [copy] [(free 1)])"))
+      (and
+        (Result.error?
+          &(resolve-source
+             "(deftemplate bad (Fn [Int] Int) \"int $NAME(int x)\" \"$DECL { return x; }\" [(allocate (argument-elements 2))])"))
+        (Result.error?
+          &(resolve-source
+             "(register bad-resize (Fn [(Ref Int)] ()) \"bad\" [unique] [(resize 0 unknown 1)])"))))))
 
 (defn rejects-invalid-register-foreign-contracts? []
   (and
@@ -632,6 +718,18 @@ answer") (Result.Success module)
   (assert-true t
     (resolves-register-foreign-contract?)
     "resolver retains explicit foreign parameter modes")
+
+  (assert-true t
+    (resolves-explicit-memory-contracts?)
+    "resolver retains structured register and template memory contracts")
+
+  (assert-true t
+    (omitted-memory-contracts-stay-unknown?)
+    "omitted foreign memory contracts remain explicitly unknown")
+
+  (assert-true t
+    (rejects-invalid-memory-contracts?)
+    "resolver rejects malformed or out-of-range memory contracts")
 
   (assert-true t
     (rejects-invalid-register-foreign-contracts?)

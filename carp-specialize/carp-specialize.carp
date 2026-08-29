@@ -535,11 +535,11 @@ locals). `cursor` is a one-element counter array the recursion advances.")
     (match (builtin-source-for core reference)
       (Maybe.Just source)
         (match-ref (SpecializedBuiltinSource.payload &source)
-          (CoreBuiltinPayload.External external-name _)
+          (CoreBuiltinPayload.External external-name _ _)
             (match-ref external-name
               (Maybe.Just name) (String.copy name)
               (Maybe.Nothing) (CAbi.runtime-symbol (CoreRef.name reference)))
-          (CoreBuiltinPayload.Template _ _)
+          (CoreBuiltinPayload.Template _ _ _)
             (CAbi.mangle (CoreRef.name reference) signature))
       (Maybe.Nothing) (CAbi.mangle (CoreRef.name reference) signature)))
 

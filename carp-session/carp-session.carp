@@ -400,9 +400,9 @@ traces retained once by `CompilerSession`.")
         (let [source (Array.unsafe-nth (CoreModule.builtin-sources core) i)]
           (when (CoreIR.same-ref? (CoreBuiltinSource.reference source) reference)
             (match-ref (CoreBuiltinSource.payload source)
-              (CoreBuiltinPayload.Template _ _)
+              (CoreBuiltinPayload.Template _ _ _)
                 (set! result (SessionDefKind.Other (String.copy "template")))
-              (CoreBuiltinPayload.External _ _)
+              (CoreBuiltinPayload.External _ _ _)
                 (set! result (SessionDefKind.External))))))
       (for [i 0 (Array.length (CoreModule.constructors core))]
         (when (CoreIR.same-ref?

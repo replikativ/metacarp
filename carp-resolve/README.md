@@ -24,6 +24,13 @@ scoped), `with`, spliced top-level `do`, `sig`, `definterface`, `register`,
 Directives without runtime meaning here (`doc`, `private`, `hidden`,
 `defmacro`, `defndynamic`, `load`, …) are accepted and ignored.
 
+`register` and `deftemplate` may carry a final structured memory-effect array.
+Omitted contracts resolve to explicit `unknown`; `[]` asserts checked direct
+no-effect, while allocate/resize/free entries retain extents and argument
+indices in Core IR for transitive memory analysis. The resolver validates the
+grammar, function-argument bounds, and resize invalidation shape, but the
+native implementation remains part of the trusted contract boundary.
+
 Type syntax: scalar and `Unit` types, type variables, `Named` types with
 arguments, `Ref`/`ref` reference types with lifetimes, and `Fn` function types.
 

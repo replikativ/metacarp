@@ -682,6 +682,174 @@ same-named events.")
   (hidden register-qualified-name)
   (private foreign-contract-modes)
   (hidden foreign-contract-modes)
+  (private memory-contract)
+  (hidden memory-contract)
+  (private memory-effect)
+  (hidden memory-effect)
+  (private memory-extent)
+  (hidden memory-extent)
+  (defn omitted-memory-contract []
+    (CoreMemoryManifest.init
+      [(CoreMemoryEffect.Unknown)] [] (String.copy "omitted")))
+
+  (defn memory-index [node message]
+    (match-ref (SurfaceNode.form node)
+      (SurfaceForm.IntLit value)
+        (if (Int.>= @value 0)
+          (Result.Success @value)
+          (Result.Error (error-at node message)))
+      _ (Result.Error (error-at node message))))
+
+  (defn memory-extent [node]
+    (match (symbol-key node)
+      (Maybe.Just name)
+        (if (String.= &name "unknown")
+          (Result.Success (CoreMemoryExtent.Unknown))
+          (Result.Error
+            (error-at node
+                      @"memory extent must be unknown, (exact-elements n), or (argument-elements n)")))
+      (Maybe.Nothing)
+        (match-ref (SurfaceNode.form node)
+          (SurfaceForm.List raw-items)
+            (let [items (semantic-items raw-items)]
+              (if (Int.= (Array.length &items) 2)
+                (let [head (Box.peek (Array.unsafe-nth &items 0))
+                      value (Box.peek (Array.unsafe-nth &items 1))]
+                  (match (symbol-key head)
+                    (Maybe.Just name)
+                      (cond
+                        (String.= &name "exact-elements")
+                          (match (memory-index value
+                                   @"exact-elements requires a non-negative integer")
+                            (Result.Success n)
+                              (Result.Success (CoreMemoryExtent.ExactElements n))
+                            (Result.Error error) (Result.Error error))
+                        (String.= &name "argument-elements")
+                          (match (memory-index value
+                                   @"argument-elements requires a non-negative argument index")
+                            (Result.Success n)
+                              (Result.Success (CoreMemoryExtent.ArgumentElements n))
+                            (Result.Error error) (Result.Error error))
+                        (Result.Error
+                          (error-at head
+                                    @"memory extent must use exact-elements or argument-elements")))
+                    (Maybe.Nothing)
+                      (Result.Error
+                        (error-at head @"memory extent head must be a symbol"))))
+                (Result.Error
+                  (error-at node @"memory extent expects a kind and integer"))))
+          _ (Result.Error
+              (error-at node
+                        @"memory extent must be unknown, (exact-elements n), or (argument-elements n)")))))
+
+  (defn memory-effect [node]
+    (match (symbol-key node)
+      (Maybe.Just name)
+        (if (String.= &name "unknown")
+          (Result.Success (CoreMemoryEffect.Unknown))
+          (Result.Error
+            (error-at node
+                      @"bare memory effect must be unknown")))
+      (Maybe.Nothing)
+        (match-ref (SurfaceNode.form node)
+          (SurfaceForm.List raw-items)
+            (let [items (semantic-items raw-items)]
+              (if (Int.> (Array.length &items) 0)
+                (let [head (Box.peek (Array.unsafe-nth &items 0))]
+                  (match (symbol-key head)
+                    (Maybe.Just name)
+                      (cond
+                        (String.= &name "allocate")
+                          (if (Int.= (Array.length &items) 2)
+                            (match (memory-extent
+                                     (Box.peek (Array.unsafe-nth &items 1)))
+                              (Result.Success extent)
+                                (Result.Success (CoreMemoryEffect.Allocate extent))
+                              (Result.Error error) (Result.Error error))
+                            (Result.Error
+                              (error-at node @"allocate effect expects one extent")))
+                        (String.= &name "free")
+                          (if (Int.= (Array.length &items) 2)
+                            (match (memory-index
+                                     (Box.peek (Array.unsafe-nth &items 1))
+                                     @"free requires a non-negative argument index")
+                              (Result.Success argument)
+                                (Result.Success (CoreMemoryEffect.Free argument))
+                              (Result.Error error) (Result.Error error))
+                            (Result.Error
+                              (error-at node @"free effect expects one argument index")))
+                        (String.= &name "resize")
+                          (if (Int.= (Array.length &items) 4)
+                            (match (memory-index
+                                     (Box.peek (Array.unsafe-nth &items 1))
+                                     @"resize requires a non-negative argument index")
+                              (Result.Success argument)
+                                (match (memory-extent
+                                         (Box.peek (Array.unsafe-nth &items 2)))
+                                  (Result.Success extent)
+                                    (match-ref
+                                      (SurfaceNode.form
+                                        (Box.peek (Array.unsafe-nth &items 3)))
+                                      (SurfaceForm.BoolLit may-move)
+                                        (Result.Success
+                                          (CoreMemoryEffect.Resize
+                                            argument extent @may-move))
+                                      _ (Result.Error
+                                          (error-at
+                                            (Box.peek (Array.unsafe-nth &items 3))
+                                            @"resize may-move must be a boolean")))
+                                  (Result.Error error) (Result.Error error))
+                              (Result.Error error) (Result.Error error))
+                            (Result.Error
+                              (error-at node
+                                @"resize effect expects argument, extent, and may-move")))
+                        (Result.Error
+                          (error-at head
+                            @"memory effect must be allocate, resize, or free")))
+                    (Maybe.Nothing)
+                      (Result.Error
+                        (error-at head @"memory effect head must be a symbol"))))
+                (Result.Error (error-at node @"memory effect cannot be empty"))))
+          _ (Result.Error
+              (error-at node @"memory effect must be unknown or a list")))))
+
+  (defn memory-contract [node]
+    (match-ref (SurfaceNode.form node)
+      (SurfaceForm.Array raw-effects)
+        (let-do [items (semantic-items raw-effects)
+                 effects (the (Array CoreMemoryEffect) [])
+                 invalidates (the (Array Int) [])
+                 unknown-count 0
+                 result (the (Result Unit ResolveError) (Result.Success ()))]
+          (for [i 0 (Array.length &items)]
+            (match-ref &result
+              (Result.Success _)
+                (match (memory-effect (Box.peek (Array.unsafe-nth &items i)))
+                  (Result.Success effect)
+                    (do
+                      (match-ref &effect
+                        (CoreMemoryEffect.Resize argument _ may-move)
+                          (when @may-move
+                            (Array.push-back! &invalidates @argument))
+                        (CoreMemoryEffect.Unknown)
+                          (set! unknown-count (Int.inc unknown-count))
+                        _ ())
+                      (Array.push-back! &effects effect))
+                  (Result.Error error) (set! result (Result.Error error)))
+              (Result.Error _) ()))
+          (match result
+            (Result.Error error) (Result.Error error)
+            (Result.Success _)
+              (if (and (Int.> unknown-count 0)
+                       (Int.> (Array.length &effects) 1))
+                (Result.Error
+                  (error-at node @"unknown must be the only memory effect"))
+                (Result.Success
+                  (CoreMemoryManifest.init effects invalidates
+                                           (String.copy "declared"))))))
+      _ (Result.Error
+          (error-at node @"memory contract must be an effect array"))))
+
   (defn register-qualified-name [node]
     (match-ref (SurfaceNode.form node)
       (SurfaceForm.List raw-items)
@@ -733,6 +901,48 @@ same-named events.")
             (Result.Error error) (Result.Error error)))
       _ (Result.Error (error-at node @"foreign parameter contract must be an array"))))
 
+  (defn register-payload [node items]
+    (let [n (Array.length items)]
+      (if (or (Int.< n 3) (Int.> n 6))
+        (Result.Error
+          (error-at node
+            @"register expects name, signature, optional external name, optional parameter modes, and optional memory effects"))
+        (if (Int.= n 3)
+          (Result.Success
+            (CoreBuiltinPayload.External
+              (Maybe.Nothing) (Maybe.Nothing) (omitted-memory-contract)))
+          (let [external-node (Box.peek (Array.unsafe-nth items 3))]
+            (match-ref (SurfaceNode.form external-node)
+              (SurfaceForm.StringLit external-name)
+                (if (Int.>= n 5)
+                  (match (foreign-contract-modes
+                           (Box.peek (Array.unsafe-nth items 4)))
+                    (Result.Success modes)
+                      (if (Int.= n 6)
+                        (match (memory-contract
+                                 (Box.peek (Array.unsafe-nth items 5)))
+                          (Result.Success memory)
+                            (Result.Success
+                              (CoreBuiltinPayload.External
+                                (Maybe.Just (String.copy external-name))
+                                (Maybe.Just modes)
+                                memory))
+                          (Result.Error error) (Result.Error error))
+                        (Result.Success
+                          (CoreBuiltinPayload.External
+                            (Maybe.Just (String.copy external-name))
+                            (Maybe.Just modes)
+                            (omitted-memory-contract))))
+                    (Result.Error error) (Result.Error error))
+                  (Result.Success
+                    (CoreBuiltinPayload.External
+                      (Maybe.Just (String.copy external-name))
+                      (Maybe.Nothing)
+                      (omitted-memory-contract))))
+              _ (Result.Error
+                  (error-at external-node
+                            @"register external name must be a string"))))))))
+
   (defn register-shape [node scope]
     (match (register-qualified-name node)
       (Maybe.Just bad)
@@ -746,52 +956,16 @@ same-named events.")
           (Result.Success shape)
             (match-ref (SurfaceNode.form node)
               (SurfaceForm.List raw-items)
-                (let [items (semantic-items raw-items)
-                      n (Array.length &items)]
-                  (if (or (Int.= n 3) (or (Int.= n 4) (Int.= n 5)))
-                    (if (Int.>= n 4)
-                      (match-ref (SurfaceNode.form (Box.peek (Array.unsafe-nth &items
-                                                                               3)))
-                        (SurfaceForm.StringLit external-name)
-                          (if (Int.= n 5)
-                            (match (foreign-contract-modes
-                                     (Box.peek (Array.unsafe-nth &items 4)))
-                              (Result.Success modes)
-                                (Result.Success
-                                  (TypedShape.init @(TypedShape.name &shape)
-                                                   @(TypedShape.signature &shape)
-                                                   (Maybe.Just
-                                                     (CoreBuiltinPayload.External
-                                                       (Maybe.Just (String.copy external-name))
-                                                       (Maybe.Just modes)))
-                                                   @(TypedShape.span &shape)
-                                                   @(TypedShape.stamp &shape)))
-                              (Result.Error error) (Result.Error error))
-                            (Result.Success
-                              (TypedShape.init @(TypedShape.name &shape)
-                                               @(TypedShape.signature &shape)
-                                               (Maybe.Just
-                                                 (CoreBuiltinPayload.External
-                                                   (Maybe.Just (String.copy external-name))
-                                                   (Maybe.Nothing)))
-                                               @(TypedShape.span &shape)
-                                               @(TypedShape.stamp &shape))))
-                        _
-                          (Result.Error
-                            (error-at (Box.peek (Array.unsafe-nth &items 3))
-                                      @"register external name must be a string")))
+                (let [items (semantic-items raw-items)]
+                  (match (register-payload node &items)
+                    (Result.Success payload)
                       (Result.Success
                         (TypedShape.init @(TypedShape.name &shape)
                                          @(TypedShape.signature &shape)
-                                         (Maybe.Just
-                                           (CoreBuiltinPayload.External
-                                             (Maybe.Nothing)
-                                             (Maybe.Nothing)))
+                                         (Maybe.Just payload)
                                          @(TypedShape.span &shape)
-                                         @(TypedShape.stamp &shape))))
-                    (Result.Error
-                      (error-at node
-                                @"register expects a name, signature, optional external name, and optional parameter contract"))))
+                                         @(TypedShape.stamp &shape)))
+                    (Result.Error error) (Result.Error error)))
               _ (Result.Error (error-at node @"register must be a list")))
           (Result.Error error) (Result.Error error))))
 
@@ -801,7 +975,8 @@ same-named events.")
         (match-ref (SurfaceNode.form node)
           (SurfaceForm.List raw-items)
             (let [items (semantic-items raw-items)]
-              (if (Int.= (Array.length &items) 5)
+              (if (or (Int.= (Array.length &items) 5)
+                      (Int.= (Array.length &items) 6))
                 (let [declaration-node (Box.peek (Array.unsafe-nth &items 3))
                       body-node (Box.peek (Array.unsafe-nth &items 4))]
                   (match-ref (SurfaceNode.form declaration-node)
@@ -810,14 +985,33 @@ same-named events.")
                         (SurfaceForm.StringLit body)
                           (let [signature (Box.init
                                   (SurfaceNode.copy (Box.peek (TypedShape.signature &shape))))]
-                            (Result.Success
-                              (TypedShape.init @(TypedShape.name &shape)
-                                               signature
-                                               (Maybe.Just
-                                                 (CoreBuiltinPayload.Template (String.copy declaration)
-                                                                              (String.copy body)))
-                                               @(TypedShape.span &shape)
-                                               @(TypedShape.stamp &shape))))
+                            (if (Int.= (Array.length &items) 6)
+                              (match (memory-contract
+                                       (Box.peek (Array.unsafe-nth &items 5)))
+                                (Result.Success memory)
+                                  (Result.Success
+                                    (TypedShape.init
+                                      @(TypedShape.name &shape)
+                                      signature
+                                      (Maybe.Just
+                                        (CoreBuiltinPayload.Template
+                                          (String.copy declaration)
+                                          (String.copy body)
+                                          memory))
+                                      @(TypedShape.span &shape)
+                                      @(TypedShape.stamp &shape)))
+                                (Result.Error error) (Result.Error error))
+                              (Result.Success
+                                (TypedShape.init
+                                  @(TypedShape.name &shape)
+                                  signature
+                                  (Maybe.Just
+                                    (CoreBuiltinPayload.Template
+                                      (String.copy declaration)
+                                      (String.copy body)
+                                      (omitted-memory-contract)))
+                                  @(TypedShape.span &shape)
+                                  @(TypedShape.stamp &shape)))))
                         _
                           (Result.Error
                             (error-at body-node
@@ -828,7 +1022,7 @@ same-named events.")
                                   @"deftemplate declaration must be a string"))))
                 (Result.Error
                   (error-at node
-                            @"deftemplate expects name, signature, declaration, and body"))))
+                            @"deftemplate expects name, signature, declaration, body, and optional memory effects"))))
           _ (Result.Error (error-at node @"deftemplate must be a list")))
       (Result.Error error) (Result.Error error)))
 
@@ -3796,9 +3990,11 @@ back to plain reference resolution.")
   (hidden resolve-builtin-sources)
   (private foreign-contract-compatible?)
   (hidden foreign-contract-compatible?)
-  (defn foreign-contract-compatible? [payload signature]
+  (private foreign-modes-compatible?)
+  (hidden foreign-modes-compatible?)
+  (defn foreign-modes-compatible? [payload signature]
     (match-ref payload
-      (CoreBuiltinPayload.External _ declared)
+      (CoreBuiltinPayload.External _ declared _)
         (match-ref declared
           (Maybe.Nothing) true
           (Maybe.Just modes)
@@ -3823,6 +4019,45 @@ back to plain reference resolution.")
                   ok)
               _ false))
       _ true))
+
+  (defn memory-index-compatible? [index signature]
+    (match-ref signature
+      (CoreType.Function arguments _)
+        (Int.< index (Array.length arguments))
+      _ false))
+
+  (defn memory-extent-compatible? [extent signature]
+    (match-ref extent
+      (CoreMemoryExtent.ArgumentElements argument)
+        (memory-index-compatible? @argument signature)
+      _ true))
+
+  (defn memory-contract-compatible? [memory signature]
+    (let-do [ok true
+             effects (CoreMemoryManifest.effects memory)]
+      (for [i 0 (Array.length effects)]
+        (match-ref (Array.unsafe-nth effects i)
+          (CoreMemoryEffect.Allocate extent)
+            (unless (memory-extent-compatible? extent signature)
+              (set! ok false))
+          (CoreMemoryEffect.Resize argument extent _)
+            (unless (and (memory-index-compatible? @argument signature)
+                         (memory-extent-compatible? extent signature))
+              (set! ok false))
+          (CoreMemoryEffect.Free argument)
+            (unless (memory-index-compatible? @argument signature)
+              (set! ok false))
+          (CoreMemoryEffect.Unknown) ()))
+      ok))
+
+  (defn foreign-contract-compatible? [payload signature]
+    (and
+      (foreign-modes-compatible? payload signature)
+      (match-ref payload
+        (CoreBuiltinPayload.External _ _ memory)
+          (memory-contract-compatible? memory signature)
+        (CoreBuiltinPayload.Template _ _ memory)
+          (memory-contract-compatible? memory signature))))
   (defn resolve-builtins [shapes globals]
     (let-do [result (the
                (Result (Array CoreBuiltin) ResolveError)
@@ -3878,7 +4113,7 @@ back to plain reference resolution.")
                             (set! result
                                   (Result.Error
                                     (ResolveError.init
-                                      @"foreign parameter contract must match function arity and use shared/unique only for Ref parameters"
+                                      @"foreign parameter/memory contract must match function arity; shared/unique require Ref parameters"
                                       @(TypedShape.span shape)))))
                         (Result.Error error) (set! result (Result.Error error)))
                     (Maybe.Nothing)

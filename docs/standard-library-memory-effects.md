@@ -179,6 +179,40 @@ allocation primitives. Arbitrary external C/Rust/JVM calls require a declared
 summary; `unknown` remains safe but prevents `noalloc`, bounded-capacity, and
 hard real-time proofs.
 
+Source `register` and `deftemplate` declarations now accept an optional final
+memory-effect array. Omission means `[unknown]`; an explicitly empty array is a
+checked no-effect assertion:
+
+```clojure
+(register clock-now (Fn [] Long) "clock_now" [] [])
+(register reserve (Fn [Int] (Ptr Byte)) "reserve" [copy]
+  [(allocate (argument-elements 0))])
+(deftemplate Pointer.free (Fn [(Ptr a)] ())
+  "void $NAME($a* p)" "$DECL { CARP_FREE(p); }"
+  [(free 0)])
+```
+
+The effect grammar is:
+
+```text
+[]
+[unknown]
+[(allocate unknown)]
+[(allocate (exact-elements n))]
+[(allocate (argument-elements argument-index))]
+[(free argument-index)]
+[(resize argument-index extent may-move)]
+```
+
+Several effects may appear in one array, except that `unknown` must stand
+alone. Argument indices and argument-derived extents are checked against the
+function signature; a relocating resize automatically invalidates loans
+derived from its owner argument. For `register`, the existing foreign
+parameter-mode array precedes the memory array, so a zero-argument audited
+registration uses `[] []`. These are trusted native contracts: the compiler
+validates shape and composes them soundly, but auditing C against the assertion
+is a separate build/toolchain responsibility.
+
 ## JVM/Valhalla/Graal as a host, not the ontology
 
 Valhalla is valuable because value classes and flat fields/arrays can preserve
@@ -265,8 +299,8 @@ resolved specialized-body edges. Allocate, resize, free, and unknown remain
 independent summary bits. Direct sites and edges are exposed through the
 session/CBOR experimental query so a later verifier can reconstruct call-chain
 diagnostics. Primitive template dependencies that are not fully represented by
-their manifest remain `Unknown`; source syntax for discharging audited native
-contracts is intentionally still absent.
+their manifest remain `Unknown`. Audited source contracts can now discharge a
+foreign leaf; omitted contracts remain unknown for compatibility and safety.
 
 1. Move the experimental allocation walker out of `carp-session` into a
    dedicated compiler memory-analysis module.

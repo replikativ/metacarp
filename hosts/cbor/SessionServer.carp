@@ -382,34 +382,34 @@
 
 (defn memory-extent-value [extent]
   (match-ref extent
-    (PrimitiveMemoryExtent.ExactElements count)
+    (CoreMemoryExtent.ExactElements count)
       (box-map
         [(map-entry "kind" (box-text "exact-elements"))
          (map-entry "value" (box-int @count))])
-    (PrimitiveMemoryExtent.ArgumentElements argument)
+    (CoreMemoryExtent.ArgumentElements argument)
       (box-map
         [(map-entry "kind" (box-text "argument-elements"))
          (map-entry "value" (box-int @argument))])
-    (PrimitiveMemoryExtent.Unknown)
+    (CoreMemoryExtent.Unknown)
       (box-map [(map-entry "kind" (box-text "unknown"))])))
 
 (defn memory-effect-value [effect]
   (match-ref effect
-    (PrimitiveMemoryEffect.Allocate extent)
+    (CoreMemoryEffect.Allocate extent)
       (box-map
         [(map-entry "kind" (box-text "allocate"))
          (map-entry "extent" (memory-extent-value extent))])
-    (PrimitiveMemoryEffect.Resize argument extent may-move)
+    (CoreMemoryEffect.Resize argument extent may-move)
       (box-map
         [(map-entry "kind" (box-text "resize"))
          (map-entry "argument" (box-int @argument))
          (map-entry "extent" (memory-extent-value extent))
          (map-entry "may-move" (box-bool @may-move))])
-    (PrimitiveMemoryEffect.Free argument)
+    (CoreMemoryEffect.Free argument)
       (box-map
         [(map-entry "kind" (box-text "free"))
          (map-entry "argument" (box-int @argument))])
-    (PrimitiveMemoryEffect.Unknown)
+    (CoreMemoryEffect.Unknown)
       (box-map [(map-entry "kind" (box-text "unknown"))])))
 
 (defn memory-effect-site-value [effect-site]

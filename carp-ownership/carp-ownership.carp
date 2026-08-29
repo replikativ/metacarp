@@ -451,7 +451,7 @@ deleters are polymorphic over each arity.")
       (for [i 0 (Array.length sources)]
         (let [source (Array.unsafe-nth sources i)]
           (match-ref (CoreBuiltinSource.payload source)
-            (CoreBuiltinPayload.External _ contract)
+            (CoreBuiltinPayload.External _ contract _)
               (match-ref contract
                 (Maybe.Just modes)
                   (Array.push-back! &foreign-modes
@@ -2422,7 +2422,7 @@ of its owned arguments and must release any it neither returns nor passes on.")
     (match-ref (SpecializedPrimitive.source primitive)
       (Maybe.Just source)
         (match-ref (SpecializedBuiltinSource.payload source)
-          (CoreBuiltinPayload.External _ declared-modes)
+          (CoreBuiltinPayload.External _ declared-modes _)
             (match-ref declared-modes
               (Maybe.Just modes)
                 (let [specialization
@@ -2480,7 +2480,7 @@ the two valid refinements of a reference parameter.")
           (match-ref (SpecializedPrimitive.source primitive)
             (Maybe.Just source)
               (match-ref (SpecializedBuiltinSource.payload source)
-                (CoreBuiltinPayload.External _ declared-modes)
+                (CoreBuiltinPayload.External _ declared-modes _)
                   (let [specialization (SpecializedPrimitive.specialization primitive)]
                     (match-ref (Box.peek (Specialization.signature specialization))
                       (MonoType.Function argument-types result-type)
