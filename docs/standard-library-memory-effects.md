@@ -256,8 +256,17 @@ no-effect cases are declared beside their lowering; unresolved interfaces and
 templates remain explicitly `Unknown`. The session allocation report now
 interprets `ArgumentElements` from these manifests instead of matching stable
 primitive IDs. This is direct-effect infrastructure only: a checked empty
-manifest does not become a transitive `noalloc` proof until step 4 accounts for
-ordinary callees, callbacks, and template dependencies.
+manifest does not by itself become a transitive `noalloc` proof.
+
+The second slice supplies the conservative core of steps 3 and 4. It marks
+unannotated foreign/template calls, indirect calls, and explicitly unknown
+primitive manifests as unresolved leaves, and computes a least fixed point over
+resolved specialized-body edges. Allocate, resize, free, and unknown remain
+independent summary bits. Direct sites and edges are exposed through the
+session/CBOR experimental query so a later verifier can reconstruct call-chain
+diagnostics. Primitive template dependencies that are not fully represented by
+their manifest remain `Unknown`; source syntax for discharging audited native
+contracts is intentionally still absent.
 
 1. Move the experimental allocation walker out of `carp-session` into a
    dedicated compiler memory-analysis module.

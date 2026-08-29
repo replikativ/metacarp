@@ -26,6 +26,48 @@ are target-independent facts awaiting the C ABI layout pass.")
    evidence String
    span (Maybe SourceSpan)])
 
+(doc MemoryEffectSite "attaches one direct memory effect to the specialized
+expression that causes it. The primitive effect retains call-argument extent
+information; `source` identifies an IR construct or resolved primitive.")
+(deftype MemoryEffectSite
+  [site OwnershipSite
+   effect PrimitiveMemoryEffect
+   source String
+   span (Maybe SourceSpan)])
+
+(doc MemoryCallEdge "is a statically resolved edge between specialized bodies.
+`target` indexes `SpecializationModule.bodies`, making cycles explicit without
+building a recursive value graph.")
+(deftype MemoryCallEdge
+  [site OwnershipSite
+   target Int
+   callee String
+   span (Maybe SourceSpan)])
+
+(doc MemoryUnresolvedLeaf "prevents a closed-system memory proof. Current
+reasons include indirect calls, unannotated foreign/template calls, and
+explicitly unknown primitive manifests.")
+(deftype MemoryUnresolvedLeaf
+  [site OwnershipSite
+   callee String
+   reason String
+   span (Maybe SourceSpan)])
+
+(doc SpecializedMemorySummary "is the least fixed-point memory summary for one
+specialized body. The four flags are independent: `frees` does not imply
+`allocates`, while `unknown` prevents both noalloc and no-memory-effect proofs.
+`effects` contains only direct sites; transitive provenance is retained by
+`calls` instead of copying callee sites into every caller.")
+(deftype SpecializedMemorySummary
+  [specialization Specialization
+   effects (Array MemoryEffectSite)
+   calls (Array MemoryCallEdge)
+   unresolved (Array MemoryUnresolvedLeaf)
+   allocates Bool
+   resizes Bool
+   frees Bool
+   unknown Bool])
+
 (doc MemoryAnalysis "derives backend-neutral memory obligations from
 specialized Core. It deliberately reports only facts justified by the current
 IR and primitive manifests; allocator selection and target layout remain later
@@ -225,4 +267,291 @@ the registry manifest, not through resolver IDs or generated C spelling.")
                   target)
             (collect-allocation-facts! (Box.peek (SpecializedBody.body body))
                                        i name provenance &facts))))
-      facts)))
+      facts))
+
+  (private summary-body-index)
+  (hidden summary-body-index)
+  (defn summary-body-index [bodies reference signature]
+    (let-do [found -1]
+      (for [i 0 (Array.length bodies)]
+        (let [specialization (SpecializedBody.specialization
+                               (Array.unsafe-nth bodies i))]
+          (when (and
+              (CoreIR.same-ref? (Specialization.reference specialization)
+                                reference)
+              (Type.same-representation?
+                (Box.peek (Specialization.signature specialization))
+                signature))
+            (set! found i))))
+      found))
+
+  (private append-effect-site!)
+  (hidden append-effect-site!)
+  (defn append-effect-site! [effects effect context id source provenance]
+    (Array.push-back! effects
+      (MemoryEffectSite.init
+        (OwnershipSite.init context id)
+        (PrimitiveMemoryEffect.copy effect)
+        (String.copy source)
+        (CoreProvenance.node-span provenance id))))
+
+  (private append-unresolved!)
+  (hidden append-unresolved!)
+  (defn append-unresolved! [unresolved context id callee reason provenance]
+    (Array.push-back! unresolved
+      (MemoryUnresolvedLeaf.init
+        (OwnershipSite.init context id)
+        (String.copy callee)
+        (String.copy reason)
+        (CoreProvenance.node-span provenance id))))
+
+  (private append-manifest!)
+  (hidden append-manifest!)
+  (defn append-manifest! [manifest context id source provenance effects unresolved]
+    (let [declared (PrimitiveMemoryManifest.effects manifest)]
+      (for [i 0 (Array.length declared)]
+        (let [effect (Array.unsafe-nth declared i)]
+          (do
+            (append-effect-site! effects effect context id source provenance)
+            (match-ref effect
+              (PrimitiveMemoryEffect.Unknown)
+                (append-unresolved! unresolved context id source
+                                    "primitive-manifest-unknown" provenance)
+              _ ()))))))
+
+  (private collect-summary!)
+  (hidden collect-summary!)
+  (private collect-summary-array!)
+  (hidden collect-summary-array!)
+  (private collect-summary-branches!)
+  (hidden collect-summary-branches!)
+  (sig collect-summary!
+       (Fn [(Ref SpecializedExpr) (Ref SpecializationModule)
+            (Ref CoreProvenance) Int (Ref (Array MemoryEffectSite))
+            (Ref (Array MemoryCallEdge)) (Ref (Array MemoryUnresolvedLeaf))] ()))
+  (sig collect-summary-array!
+       (Fn [(Ref (Array (Box SpecializedExpr))) (Ref SpecializationModule)
+            (Ref CoreProvenance) Int (Ref (Array MemoryEffectSite))
+            (Ref (Array MemoryCallEdge)) (Ref (Array MemoryUnresolvedLeaf))] ()))
+  (sig collect-summary-branches!
+       (Fn [(Ref (Array SpecializedMatchBranch)) (Ref SpecializationModule)
+            (Ref CoreProvenance) Int (Ref (Array MemoryEffectSite))
+            (Ref (Array MemoryCallEdge)) (Ref (Array MemoryUnresolvedLeaf))] ()))
+
+  (defn collect-summary-array! [expressions specialized provenance context
+                                effects calls unresolved]
+    (for [i 0 (Array.length expressions)]
+      (collect-summary! (Box.peek (Array.unsafe-nth expressions i))
+                        specialized provenance context effects calls unresolved)))
+
+  (defn collect-summary-branches! [branches specialized provenance context
+                                   effects calls unresolved]
+    (for [i 0 (Array.length branches)]
+      (collect-summary!
+        (Box.peek (SpecializedMatchBranch.body (Array.unsafe-nth branches i)))
+        specialized provenance context effects calls unresolved)))
+
+  (defn collect-summary! [expression specialized provenance context
+                          effects calls unresolved]
+    (match-ref expression
+      (SpecializedExpr.ArrayLit id _ elements)
+        (do
+          (when-do (Int.> (Array.length elements) 0)
+            (let [effect (PrimitiveMemoryEffect.Allocate
+                           (PrimitiveMemoryExtent.ExactElements
+                             (Array.length elements)))]
+              (append-effect-site! effects &effect context @id
+                                   "array-literal" provenance)))
+          (collect-summary-array! elements specialized provenance context
+                                  effects calls unresolved))
+      (SpecializedExpr.GlobalCall id _ reference signature symbol arguments)
+        (do
+          (collect-summary-array! arguments specialized provenance context
+                                  effects calls unresolved)
+          (if (String.starts-with? symbol "_carp_closure_")
+            (let [effect (PrimitiveMemoryEffect.Allocate
+                           (PrimitiveMemoryExtent.Unknown))]
+              (append-effect-site! effects &effect context @id
+                                   "closure-environment" provenance))
+            (let [target (summary-body-index
+                           (SpecializationModule.bodies specialized)
+                           reference
+                           (Box.peek signature))]
+              (if (Int.>= target 0)
+                (Array.push-back! calls
+                  (MemoryCallEdge.init
+                    (OwnershipSite.init context @id)
+                    target
+                    (String.copy (CoreRef.name reference))
+                    (CoreProvenance.node-span provenance @id)))
+                (match (PrimitiveRegistry.memory-for reference)
+                  (Maybe.Just manifest)
+                    (append-manifest! &manifest context @id
+                                      (CoreRef.name reference) provenance
+                                      effects unresolved)
+                  (Maybe.Nothing)
+                    (append-unresolved! unresolved context @id
+                                        (CoreRef.name reference)
+                                        "unannotated-foreign-or-template"
+                                        provenance))))))
+      (SpecializedExpr.Call id _ callee arguments)
+        (do
+          (collect-summary! (Box.peek callee) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary-array! arguments specialized provenance context
+                                  effects calls unresolved)
+          (append-unresolved! unresolved context @id "<indirect>"
+                              "indirect-call" provenance))
+      (SpecializedExpr.Do _ _ expressions)
+        (collect-summary-array! expressions specialized provenance context
+                                effects calls unresolved)
+      (SpecializedExpr.If _ _ condition then-branch else-branch)
+        (do
+          (collect-summary! (Box.peek condition) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary! (Box.peek then-branch) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary! (Box.peek else-branch) specialized provenance context
+                            effects calls unresolved))
+      (SpecializedExpr.Let _ _ _ value body)
+        (do
+          (collect-summary! (Box.peek value) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary! (Box.peek body) specialized provenance context
+                            effects calls unresolved))
+      (SpecializedExpr.Set _ _ _ value)
+        (collect-summary! (Box.peek value) specialized provenance context
+                          effects calls unresolved)
+      (SpecializedExpr.While _ _ condition body)
+        (do
+          (collect-summary! (Box.peek condition) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary! (Box.peek body) specialized provenance context
+                            effects calls unresolved))
+      ;; Lambda bodies are separate computations, not effects of constructing a
+      ;; non-capturing function value. Capturing construction is represented by
+      ;; the `_carp_closure_` GlobalCall handled above.
+      (SpecializedExpr.Lambda _ _ _ _) ()
+      (SpecializedExpr.Match _ _ _ scrutinee branches)
+        (do
+          (collect-summary! (Box.peek scrutinee) specialized provenance context
+                            effects calls unresolved)
+          (collect-summary-branches! branches specialized provenance context
+                                     effects calls unresolved))
+      (SpecializedExpr.Annotation _ _ inner _)
+        (collect-summary! (Box.peek inner) specialized provenance context
+                          effects calls unresolved)
+      (SpecializedExpr.StaticArrayLit _ _ elements)
+        (collect-summary-array! elements specialized provenance context
+                                effects calls unresolved)
+      _ ()))
+
+  (private summary-has-allocate?)
+  (hidden summary-has-allocate?)
+  (private summary-has-resize?)
+  (hidden summary-has-resize?)
+  (private summary-has-free?)
+  (hidden summary-has-free?)
+  (private summary-has-unknown?)
+  (hidden summary-has-unknown?)
+  (defn summary-has-allocate? [effects]
+    (let-do [found false]
+      (for [i 0 (Array.length effects)]
+        (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
+          (PrimitiveMemoryEffect.Allocate _) (set! found true)
+          _ ()))
+      found))
+  (defn summary-has-resize? [effects]
+    (let-do [found false]
+      (for [i 0 (Array.length effects)]
+        (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
+          (PrimitiveMemoryEffect.Resize _ _ _) (set! found true)
+          _ ()))
+      found))
+  (defn summary-has-free? [effects]
+    (let-do [found false]
+      (for [i 0 (Array.length effects)]
+        (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
+          (PrimitiveMemoryEffect.Free _) (set! found true)
+          _ ()))
+      found))
+  (defn summary-has-unknown? [effects]
+    (let-do [found false]
+      (for [i 0 (Array.length effects)]
+        (match-ref (MemoryEffectSite.effect (Array.unsafe-nth effects i))
+          (PrimitiveMemoryEffect.Unknown) (set! found true)
+          _ ()))
+      found))
+
+  (doc specialized-summaries "computes the least fixed point of direct memory
+effects over the specialized body call graph. Calls without a body or checked
+primitive manifest and all indirect calls remain unresolved, so the analysis
+can prove absence of effects only for a closed reachable system.")
+  (defn specialized-summaries [specialized provenance]
+    (let-do [bodies (SpecializationModule.bodies specialized)
+             n (Array.length bodies)
+             effect-sets (the (Array (Array MemoryEffectSite)) [])
+             call-sets (the (Array (Array MemoryCallEdge)) [])
+             unresolved-sets (the (Array (Array MemoryUnresolvedLeaf)) [])
+             allocates (the (Array Bool) [])
+             resizes (the (Array Bool) [])
+             frees (the (Array Bool) [])
+             unknown (the (Array Bool) [])]
+      (for [i 0 n]
+        (let-do [effects (the (Array MemoryEffectSite) [])
+                 calls (the (Array MemoryCallEdge) [])
+                 unresolved (the (Array MemoryUnresolvedLeaf) [])]
+          (collect-summary! (Box.peek
+                              (SpecializedBody.body
+                                (Array.unsafe-nth bodies i)))
+                            specialized provenance i
+                            &effects &calls &unresolved)
+          (Array.push-back! &effect-sets effects)
+          (Array.push-back! &call-sets calls)
+          (Array.push-back! &unresolved-sets unresolved)
+          (Array.push-back! &allocates
+                            (summary-has-allocate?
+                              (Array.unsafe-nth &effect-sets i)))
+          (Array.push-back! &resizes
+                            (summary-has-resize?
+                              (Array.unsafe-nth &effect-sets i)))
+          (Array.push-back! &frees
+                            (summary-has-free?
+                              (Array.unsafe-nth &effect-sets i)))
+          (Array.push-back! &unknown
+                            (or
+                              (Int.> (Array.length
+                                      (Array.unsafe-nth &unresolved-sets i)) 0)
+                              (summary-has-unknown?
+                                (Array.unsafe-nth &effect-sets i))))))
+      ;; Four monotone bits can cross at most n-1 call edges. n+1 rounds are a
+      ;; deterministic fixed-point bound, including recursive components.
+      (for [pass 0 (Int.+ n 1)]
+        (for [i 0 n]
+          (let [edges (Array.unsafe-nth &call-sets i)]
+            (for [edge-index 0 (Array.length edges)]
+              (let [target @(MemoryCallEdge.target
+                              (Array.unsafe-nth edges edge-index))]
+                (when (and (Int.>= target 0) (Int.< target n))
+                  (do
+                    (when @(Array.unsafe-nth &allocates target)
+                      (Array.aset! &allocates i true))
+                    (when @(Array.unsafe-nth &resizes target)
+                      (Array.aset! &resizes i true))
+                    (when @(Array.unsafe-nth &frees target)
+                      (Array.aset! &frees i true))
+                    (when @(Array.unsafe-nth &unknown target)
+                      (Array.aset! &unknown i true)))))))))
+      (let-do [summaries (the (Array SpecializedMemorySummary) [])]
+        (for [i 0 n]
+          (Array.push-back! &summaries
+            (SpecializedMemorySummary.init
+              @(SpecializedBody.specialization (Array.unsafe-nth bodies i))
+              (Array.copy (Array.unsafe-nth &effect-sets i))
+              (Array.copy (Array.unsafe-nth &call-sets i))
+              (Array.copy (Array.unsafe-nth &unresolved-sets i))
+              @(Array.unsafe-nth &allocates i)
+              @(Array.unsafe-nth &resizes i)
+              @(Array.unsafe-nth &frees i)
+              @(Array.unsafe-nth &unknown i))))
+        summaries))))

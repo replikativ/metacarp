@@ -535,6 +535,74 @@
                                     (Maybe.Nothing) false)))))))))))))
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
+(defn memory-summary-matches? [summaries name allocates resizes frees unknown]
+  (let-do [found false
+           matches false]
+    (for [i 0 (Array.length summaries)]
+      (let [summary (Array.unsafe-nth summaries i)]
+        (when (String.=
+            (CoreRef.name
+              (Specialization.reference
+                (SpecializedMemorySummary.specialization summary)))
+            name)
+          (do
+            (set! found true)
+            (set! matches
+              (and (= @(SpecializedMemorySummary.allocates summary) allocates)
+                   (and (= @(SpecializedMemorySummary.resizes summary) resizes)
+                        (and (= @(SpecializedMemorySummary.frees summary) frees)
+                             (= @(SpecializedMemorySummary.unknown summary)
+                                unknown)))))))))
+    (and found matches)))
+
+(defn experimental-memory-summaries-reach-a-fixed-point? []
+  (match (make-session)
+    (Result.Success session)
+      (let [source (SourceInput.init
+                     (String.copy "definition:memory:summaries")
+                     (String.copy "(defn memory-pure-leaf [] 1)
+(defn memory-pure-root [] (memory-pure-leaf))
+(defn memory-alloc-leaf [] [1 2])
+(defn memory-alloc-root [] (memory-alloc-leaf))
+(register memory-opaque (Fn [] Int) \"memory_opaque\")
+(defn memory-unknown-root [] (memory-opaque))"))]
+        (match (Session.upsert-input &session &source)
+          (Result.Error diagnostic) (diagnostic-false &diagnostic)
+          (Result.Success _)
+            (let-do [ok true]
+              (match (Session.experimental-ownership-regions
+                       &session "memory-pure-root")
+                (Result.Success report)
+                  (unless
+                    (memory-summary-matches?
+                      (OwnershipRegionReport.memory-summaries &report)
+                      "memory-pure-root" false false false false)
+                    (set! ok false))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-alloc-root")
+                (Result.Success report)
+                  (unless
+                    (memory-summary-matches?
+                      (OwnershipRegionReport.memory-summaries &report)
+                      "memory-alloc-root" true false false false)
+                    (set! ok false))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-unknown-root")
+                (Result.Success report)
+                  (let [summaries (OwnershipRegionReport.memory-summaries &report)]
+                    (unless
+                      (memory-summary-matches?
+                        summaries "memory-unknown-root" false false false true)
+                      (set! ok false)))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              ok)))
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn definition-cell-has-structured-report? []
   (match (make-session)
     (Result.Success session)
@@ -1127,6 +1195,9 @@
   (assert-true t
     (experimental-region-query-reports-array-allocation?)
     "experimental region queries retain backend-proven array allocation facts")
+  (assert-true t
+    (experimental-memory-summaries-reach-a-fixed-point?)
+    "memory summaries propagate allocation and preserve unresolved foreign leaves")
   (assert-true t
     (committed-overlay-lifecycle-is-transactional?)
     "upsert, replacement, rollback, removal, and reset are transactional")

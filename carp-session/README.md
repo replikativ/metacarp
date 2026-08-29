@@ -21,7 +21,12 @@ and evidence facts. It also reports backend-proven array allocation sites with
 a fresh symbolic allocator provenance, symbolic target layout, logical and
 physical accounting coordinates, and unresolved policy fields. Closure/copy
 allocations, concrete allocator selection, nested regions, collection, and
-promotion remain explicit limitations. The experimental query does not alter
+promotion remain explicit allocation-site limitations. The same report now
+includes least-fixed-point memory summaries for every reachable specialized
+body: direct effect sites, resolved call edges, unresolved leaves, and separate
+allocate/resize/free/unknown flags. Unannotated foreign and indirect calls stay
+unknown, so a closed pure call graph can be distinguished from an unproven one.
+The experimental query does not alter
 `OwnershipPlan`, C lowering, or API revision 2.
 `Session.emit-cell` emits a deterministic executable C translation unit without
 mutating the session, while `Session.emit-library` accepts explicit named roots

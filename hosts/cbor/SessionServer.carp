@@ -380,12 +380,112 @@
                   (box-text (OwnershipAllocationFact.evidence fact)))
        (map-entry "span" (span-value (OwnershipAllocationFact.span fact)))])))
 
+(defn memory-extent-value [extent]
+  (match-ref extent
+    (PrimitiveMemoryExtent.ExactElements count)
+      (box-map
+        [(map-entry "kind" (box-text "exact-elements"))
+         (map-entry "value" (box-int @count))])
+    (PrimitiveMemoryExtent.ArgumentElements argument)
+      (box-map
+        [(map-entry "kind" (box-text "argument-elements"))
+         (map-entry "value" (box-int @argument))])
+    (PrimitiveMemoryExtent.Unknown)
+      (box-map [(map-entry "kind" (box-text "unknown"))])))
+
+(defn memory-effect-value [effect]
+  (match-ref effect
+    (PrimitiveMemoryEffect.Allocate extent)
+      (box-map
+        [(map-entry "kind" (box-text "allocate"))
+         (map-entry "extent" (memory-extent-value extent))])
+    (PrimitiveMemoryEffect.Resize argument extent may-move)
+      (box-map
+        [(map-entry "kind" (box-text "resize"))
+         (map-entry "argument" (box-int @argument))
+         (map-entry "extent" (memory-extent-value extent))
+         (map-entry "may-move" (box-bool @may-move))])
+    (PrimitiveMemoryEffect.Free argument)
+      (box-map
+        [(map-entry "kind" (box-text "free"))
+         (map-entry "argument" (box-int @argument))])
+    (PrimitiveMemoryEffect.Unknown)
+      (box-map [(map-entry "kind" (box-text "unknown"))])))
+
+(defn memory-effect-site-value [effect-site]
+  (let [site (MemoryEffectSite.site effect-site)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "effect"
+                  (memory-effect-value (MemoryEffectSite.effect effect-site)))
+       (map-entry "source" (box-text (MemoryEffectSite.source effect-site)))
+       (map-entry "span" (span-value (MemoryEffectSite.span effect-site)))])))
+
+(defn memory-call-edge-value [edge]
+  (let [site (MemoryCallEdge.site edge)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "target" (box-int @(MemoryCallEdge.target edge)))
+       (map-entry "callee" (box-text (MemoryCallEdge.callee edge)))
+       (map-entry "span" (span-value (MemoryCallEdge.span edge)))])))
+
+(defn memory-unresolved-leaf-value [leaf]
+  (let [site (MemoryUnresolvedLeaf.site leaf)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "callee" (box-text (MemoryUnresolvedLeaf.callee leaf)))
+       (map-entry "reason" (box-text (MemoryUnresolvedLeaf.reason leaf)))
+       (map-entry "span" (span-value (MemoryUnresolvedLeaf.span leaf)))])))
+
+(defn specialized-memory-summary-value [summary]
+  (let-do [effects (the (Array (Box CborValue)) [])
+           calls (the (Array (Box CborValue)) [])
+           unresolved (the (Array (Box CborValue)) [])
+           source-effects (SpecializedMemorySummary.effects summary)
+           source-calls (SpecializedMemorySummary.calls summary)
+           source-unresolved (SpecializedMemorySummary.unresolved summary)
+           specialization (SpecializedMemorySummary.specialization summary)]
+    (for [i 0 (Array.length source-effects)]
+      (Array.push-back! &effects
+        (memory-effect-site-value (Array.unsafe-nth source-effects i))))
+    (for [i 0 (Array.length source-calls)]
+      (Array.push-back! &calls
+        (memory-call-edge-value (Array.unsafe-nth source-calls i))))
+    (for [i 0 (Array.length source-unresolved)]
+      (Array.push-back! &unresolved
+        (memory-unresolved-leaf-value
+          (Array.unsafe-nth source-unresolved i))))
+    (box-map
+      [(map-entry "name"
+                  (box-text
+                    (CoreRef.name (Specialization.reference specialization))))
+       (map-entry "symbol" (box-text (Specialization.symbol specialization)))
+       (map-entry "signature"
+                  (box-text
+                    &(Type.render
+                       (Box.peek (Specialization.signature specialization)))))
+       (map-entry "effects" (box-values effects))
+       (map-entry "calls" (box-values calls))
+       (map-entry "unresolved" (box-values unresolved))
+       (map-entry "allocates"
+                  (box-bool @(SpecializedMemorySummary.allocates summary)))
+       (map-entry "resizes"
+                  (box-bool @(SpecializedMemorySummary.resizes summary)))
+       (map-entry "frees" (box-bool @(SpecializedMemorySummary.frees summary)))
+       (map-entry "unknown"
+                  (box-bool @(SpecializedMemorySummary.unknown summary)))])))
+
 (defn ownership-region-report-value [report]
   (let-do [facts (the (Array (Box CborValue)) [])
            allocations (the (Array (Box CborValue)) [])
+           summaries (the (Array (Box CborValue)) [])
            limitations (the (Array (Box CborValue)) [])
            source-facts (OwnershipRegionReport.facts report)
            source-allocations (OwnershipRegionReport.allocations report)
+           source-summaries (OwnershipRegionReport.memory-summaries report)
            source-limitations (OwnershipRegionReport.limitations report)]
     (for [i 0 (Array.length source-facts)]
       (Array.push-back! &facts
@@ -394,6 +494,10 @@
       (Array.push-back! &allocations
         (ownership-allocation-fact-value
           (Array.unsafe-nth source-allocations i))))
+    (for [i 0 (Array.length source-summaries)]
+      (Array.push-back! &summaries
+        (specialized-memory-summary-value
+          (Array.unsafe-nth source-summaries i))))
     (for [i 0 (Array.length source-limitations)]
       (Array.push-back! &limitations
         (box-text (Array.unsafe-nth source-limitations i))))
@@ -403,6 +507,7 @@
        (map-entry "experimental" (box-bool true))
        (map-entry "facts" (box-values facts))
        (map-entry "allocations" (box-values allocations))
+       (map-entry "memory-summaries" (box-values summaries))
        (map-entry "limitations" (box-values limitations))])))
 
 (defn library-artifact-value [artifact]

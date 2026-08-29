@@ -16,7 +16,9 @@ inputs.
 The additive `ownership-regions-experimental` operation accepts the same
 single-name payload as `ownership`. It returns conservative function-region,
 handler, escape, and evidence facts, backend-proven array allocation facts,
-and a `limitations` array. Allocation facts retain symbolic allocator,
+transitive specialized memory summaries, and a `limitations` array. Summaries
+carry direct effect sites, call edges, unresolved foreign/indirect leaves, and
+independent allocate/resize/free/unknown flags. Allocation facts retain symbolic allocator,
 layout, logical-account, and physical-account coordinates instead of claiming
 a concrete CARP_MALLOC policy. It does not change protocol version 1 because
 existing operations and encodings are unchanged; clients must opt into the

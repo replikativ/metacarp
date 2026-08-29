@@ -80,6 +80,7 @@ change to OwnershipPlan or the stable ownership report.")
    scheme String
    facts (Array OwnershipRegionFact)
    allocations (Array OwnershipAllocationFact)
+   memory-summaries (Array SpecializedMemorySummary)
    limitations (Array String)])
 
 (deftype PreparedOwnership
@@ -1735,6 +1736,9 @@ explicitly unknown; the query does not change lowering.")
               (String.copy (OwnershipReport.scheme report))
               facts
               (target-allocation-facts &prepared name)
+              (MemoryAnalysis.specialized-summaries
+                (PreparedOwnership.specialized &prepared)
+                (PreparedOwnership.provenance &prepared))
               [(String.copy
                  "allocator provenance is symbolic; selection and capacity are unresolved")
                (String.copy

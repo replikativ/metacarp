@@ -200,14 +200,17 @@ demands raised outside resolution (e.g. top-level result echo).")
                      (CoreType.Unit))
                    (PrimitiveTemplate.ArraySet (reference 3 "delete"))))
   (defn tpl-endo-map [id name]
-    (builtin-spec id
-                  name
-                  (function
-                    [(Box.init
-                       (reference-type
-                         (function [(Box.init (variable "a"))] (variable "a"))))
-                     (Box.init (array-of-a))]
-                    (array-of-a))))
+    (builtin-memory-spec
+      id name
+      (function
+        [(Box.init
+           (reference-type
+             (function [(Box.init (variable "a"))] (variable "a"))))
+         (Box.init (array-of-a))]
+        (array-of-a))
+      ;; The intrinsic calls a user-supplied function whose transitive effect
+      ;; is not represented by its own direct C lowering.
+      (unknown-memory)))
   (defn tpl-endo-filter [id name]
     (template-spec id
                    name
