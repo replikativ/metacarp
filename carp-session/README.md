@@ -26,6 +26,12 @@ includes least-fixed-point memory summaries for every reachable specialized
 body: direct effect sites, resolved call edges, unresolved leaves, and separate
 allocate/resize/free/unknown flags. Unannotated foreign and indirect calls stay
 unknown, so a closed pure call graph can be distinguished from an unproven one.
+Two deterministic verifications per specialized target signature accompany the
+summaries. `noalloc` forbids allocate/resize while allowing teardown;
+`static-memory` also forbids free.
+Violations and unknowns include a call trace to the source-anchored effect or
+unresolved leaf. A `proven` status is relative to declared foreign contracts,
+not a claim that their native implementations were mechanically verified.
 The experimental query does not alter
 `OwnershipPlan`, C lowering, or API revision 2.
 `Session.emit-cell` emits a deterministic executable C translation unit without

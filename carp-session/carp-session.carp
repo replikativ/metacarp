@@ -81,6 +81,7 @@ change to OwnershipPlan or the stable ownership report.")
    facts (Array OwnershipRegionFact)
    allocations (Array OwnershipAllocationFact)
    memory-summaries (Array SpecializedMemorySummary)
+   memory-verifications (Array MemoryVerification)
    limitations (Array String)])
 
 (deftype PreparedOwnership
@@ -1726,19 +1727,38 @@ explicitly unknown; the query does not change lowering.")
       (Result.Success prepared)
         (let-do [facts (the (Array OwnershipRegionFact) [])
                  report (PreparedOwnership.report &prepared)
-                 actions (OwnershipReport.actions report)]
+                 actions (OwnershipReport.actions report)
+                 summaries (MemoryAnalysis.specialized-summaries
+                              (PreparedOwnership.specialized &prepared)
+                              (PreparedOwnership.provenance &prepared))
+                 verifications (the (Array MemoryVerification) [])
+                 noalloc-verifications (MemoryAnalysis.verify
+                                          &summaries
+                                          (PreparedOwnership.reference &prepared)
+                                          &(MemoryPolicy.NoAlloc))
+                 static-verifications (MemoryAnalysis.verify
+                                         &summaries
+                                         (PreparedOwnership.reference &prepared)
+                                         &(MemoryPolicy.StaticMemory))]
           (for [i 0 (Array.length actions)]
             (Array.push-back! &facts
               (action-region-fact name (Array.unsafe-nth actions i))))
+          (for [i 0 (Array.length &noalloc-verifications)]
+            (Array.push-back! &verifications
+              (MemoryVerification.copy
+                (Array.unsafe-nth &noalloc-verifications i))))
+          (for [i 0 (Array.length &static-verifications)]
+            (Array.push-back! &verifications
+              (MemoryVerification.copy
+                (Array.unsafe-nth &static-verifications i))))
           (Result.Success
             (OwnershipRegionReport.init
               (String.copy (OwnershipReport.name report))
               (String.copy (OwnershipReport.scheme report))
               facts
               (target-allocation-facts &prepared name)
-              (MemoryAnalysis.specialized-summaries
-                (PreparedOwnership.specialized &prepared)
-                (PreparedOwnership.provenance &prepared))
+              summaries
+              verifications
               [(String.copy
                  "allocator provenance is symbolic; selection and capacity are unresolved")
                (String.copy

@@ -555,6 +555,39 @@
                                 unknown)))))))))
     (and found matches)))
 
+(defn memory-verification-matches? [verifications policy status min-trace]
+  (let-do [found false]
+    (for [i 0 (Array.length verifications)]
+      (let [verification (Array.unsafe-nth verifications i)]
+        (when (and
+            (match-ref (MemoryVerification.policy verification)
+              (MemoryPolicy.NoAlloc) (= policy "noalloc")
+              (MemoryPolicy.StaticMemory) (= policy "static-memory"))
+            (and
+              (match-ref (MemoryVerification.status verification)
+                (MemoryVerificationStatus.Proven) (= status "proven")
+                (MemoryVerificationStatus.Violated) (= status "violated")
+                (MemoryVerificationStatus.Unknown) (= status "unknown"))
+              (Int.>= (Array.length (MemoryVerification.trace verification))
+                       min-trace)))
+          (set! found true))))
+    found))
+
+(defn memory-verification-count [verifications policy status]
+  (let-do [count 0]
+    (for [i 0 (Array.length verifications)]
+      (let [verification (Array.unsafe-nth verifications i)]
+        (when (and
+            (match-ref (MemoryVerification.policy verification)
+              (MemoryPolicy.NoAlloc) (= policy "noalloc")
+              (MemoryPolicy.StaticMemory) (= policy "static-memory"))
+            (match-ref (MemoryVerification.status verification)
+              (MemoryVerificationStatus.Proven) (= status "proven")
+              (MemoryVerificationStatus.Violated) (= status "violated")
+              (MemoryVerificationStatus.Unknown) (= status "unknown")))
+          (set! count (Int.inc count)))))
+    count))
+
 (defn experimental-memory-summaries-reach-a-fixed-point? []
   (match (make-session)
     (Result.Success session)
@@ -569,7 +602,12 @@
 (register memory-pure-foreign (Fn [] Int) \"memory_pure_foreign\" [] [])
 (defn memory-foreign-pure-root [] (memory-pure-foreign))
 (register memory-alloc-foreign (Fn [] Int) \"memory_alloc_foreign\" [] [(allocate unknown)])
-(defn memory-foreign-alloc-root [] (memory-alloc-foreign))"))]
+(defn memory-foreign-alloc-root [] (memory-alloc-foreign))
+(sig memory-free-root (Fn [(Array Int)] ()))
+(defn memory-free-root [xs] (delete xs))
+(defn memory-polymorphic [x] x)
+(defn memory-poly-int [] (memory-polymorphic 1))
+(defn memory-poly-bool [] (memory-polymorphic true))"))]
         (match (Session.upsert-input &session &source)
           (Result.Error diagnostic) (diagnostic-false &diagnostic)
           (Result.Success _)
@@ -577,20 +615,26 @@
               (match (Session.experimental-ownership-regions
                        &session "memory-pure-root")
                 (Result.Success report)
-                  (unless
-                    (memory-summary-matches?
-                      (OwnershipRegionReport.memory-summaries &report)
-                      "memory-pure-root" false false false false)
+                  (unless (and
+                      (memory-summary-matches?
+                        (OwnershipRegionReport.memory-summaries &report)
+                        "memory-pure-root" false false false false)
+                      (memory-verification-matches?
+                        (OwnershipRegionReport.memory-verifications &report)
+                        "noalloc" "proven" 0))
                     (set! ok false))
                 (Result.Error diagnostic)
                   (set! ok (diagnostic-false &diagnostic)))
               (match (Session.experimental-ownership-regions
                        &session "memory-alloc-root")
                 (Result.Success report)
-                  (unless
-                    (memory-summary-matches?
-                      (OwnershipRegionReport.memory-summaries &report)
-                      "memory-alloc-root" true false false false)
+                  (unless (and
+                      (memory-summary-matches?
+                        (OwnershipRegionReport.memory-summaries &report)
+                        "memory-alloc-root" true false false false)
+                      (memory-verification-matches?
+                        (OwnershipRegionReport.memory-verifications &report)
+                        "noalloc" "violated" 2))
                     (set! ok false))
                 (Result.Error diagnostic)
                   (set! ok (diagnostic-false &diagnostic)))
@@ -598,9 +642,12 @@
                        &session "memory-unknown-root")
                 (Result.Success report)
                   (let [summaries (OwnershipRegionReport.memory-summaries &report)]
-                    (unless
-                      (memory-summary-matches?
-                        summaries "memory-unknown-root" false false false true)
+                    (unless (and
+                        (memory-summary-matches?
+                          summaries "memory-unknown-root" false false false true)
+                        (memory-verification-matches?
+                          (OwnershipRegionReport.memory-verifications &report)
+                          "noalloc" "unknown" 1))
                       (set! ok false)))
                 (Result.Error diagnostic)
                   (set! ok (diagnostic-false &diagnostic)))
@@ -622,6 +669,32 @@
                       (OwnershipRegionReport.memory-summaries &report)
                       "memory-foreign-alloc-root" true false false false)
                     (set! ok false))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-free-root")
+                (Result.Success report)
+                  (unless (and
+                      (memory-verification-matches?
+                        (OwnershipRegionReport.memory-verifications &report)
+                        "noalloc" "proven" 0)
+                      (memory-verification-matches?
+                        (OwnershipRegionReport.memory-verifications &report)
+                        "static-memory" "violated" 1))
+                    (set! ok false))
+                (Result.Error diagnostic)
+                  (set! ok (diagnostic-false &diagnostic)))
+              (match (Session.experimental-ownership-regions
+                       &session "memory-polymorphic")
+                (Result.Success report)
+                  (let [verifications
+                         (OwnershipRegionReport.memory-verifications &report)]
+                    (unless (and
+                        (Int.= (memory-verification-count
+                                 verifications "noalloc" "proven") 2)
+                        (Int.= (memory-verification-count
+                                 verifications "static-memory" "proven") 2))
+                      (set! ok false)))
                 (Result.Error diagnostic)
                   (set! ok (diagnostic-false &diagnostic)))
               ok)))

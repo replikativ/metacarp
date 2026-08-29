@@ -213,6 +213,59 @@ registration uses `[] []`. These are trusted native contracts: the compiler
 validates shape and composes them soundly, but auditing C against the assertion
 is a separate build/toolchain responsibility.
 
+## Dynamic contract falsification
+
+`CARP_MEMORY_CONTRACT_TRACE` enables a generated C99 observer after
+`carp_memory.h` and before requested Core/native headers and generated
+templates. It interposes `CARP_MALLOC`, `CARP_REALLOC`, and `CARP_FREE`, tracks
+event counts and requested bytes, and exposes reset/snapshot/check functions.
+This makes an annotation test mechanically useful: reset or snapshot, execute a
+native API under representative inputs, and reject observations containing an
+effect that its manifest does not allow.
+
+The checked-in `scripts/smoke-memory-contract-observer.sh` builds a fixture
+whose C implementation deliberately violates its declared empty manifest. The
+smoke succeeds only when the observer falsifies that annotation by seeing both
+allocation and free events.
+
+Rust and other separately compiled native code do not pass through the C
+macros. They can report to the same executable through:
+
+```rust
+unsafe extern "C" {
+    fn carp_memory_contract_observe_external(event: i32, bytes: usize);
+}
+
+const ALLOCATE: i32 = 1;
+const RESIZE: i32 = 2;
+const FREE: i32 = 4;
+```
+
+A Rust `Allocator`/`GlobalAlloc` test adapter should call this ABI around its
+actual allocator. Reporting must itself remain allocation-free to avoid
+recursion. `scripts/smoke-memory-contract-observer-rust.sh` exercises this with
+a real `GlobalAlloc` adapter and a `Vec` allocation, again behind a deliberately
+false empty manifest. The initial C observer is process-global and intended for
+controlled single-threaded tests; per-thread/nested scopes and concurrent
+aggregation are future refinements.
+
+Dynamic observation never proves absence. It can falsify a contract on an
+executed path, while untested branches, allocator bypasses, inline assembly,
+system calls, and separately compiled code without an adapter remain outside
+the observation boundary. Evidence should therefore form a ladder rather than
+a Boolean:
+
+```text
+declared < observed(samples, target, coverage) < audited < mechanically checked
+```
+
+Static `Proven` currently means proven relative to the manifests in Core IR.
+The manifest's evidence and the dynamic observation receipts must remain
+available so consumers such as Kontor can choose the assurance level they
+require. Before bulk-annotating Core, the next harness should generate tests
+from each manifest, run representative and boundary inputs under the observer,
+and retain target/toolchain/input hashes with the result.
+
 ## JVM/Valhalla/Graal as a host, not the ontology
 
 Valhalla is valuable because value classes and flat fields/arrays can preserve
@@ -301,6 +354,14 @@ session/CBOR experimental query so a later verifier can reconstruct call-chain
 diagnostics. Primitive template dependencies that are not fully represented by
 their manifest remain `Unknown`. Audited source contracts can now discharge a
 foreign leaf; omitted contracts remain unknown for compatibility and safety.
+
+The third slice adds deterministic `noalloc` and `static-memory` verification
+for every specialized target signature to the experimental session/CBOR report.
+`noalloc` rejects allocate and resize; `static-memory` additionally rejects
+free. A violated or unknown result carries a source-anchored call trace to the
+direct effect or unresolved leaf. It also adds the opt-in C/Rust event ABI above
+so declared native contracts can be dynamically falsified before they are used
+broadly.
 
 1. Move the experimental allocation walker out of `carp-session` into a
    dedicated compiler memory-analysis module.

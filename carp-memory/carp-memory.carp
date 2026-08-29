@@ -68,6 +68,42 @@ specialized body. The four flags are independent: `frees` does not imply
    frees Bool
    unknown Bool])
 
+(deftype MemoryPolicy
+  (NoAlloc [])
+  (StaticMemory []))
+
+(deftype MemoryVerificationStatus
+  (Proven [])
+  (Violated [])
+  (Unknown []))
+
+(doc MemoryTraceStep "is one source-anchored step in a memory proof failure.
+Call steps lead from a caller to a specialized callee; the final step is a
+forbidden direct effect or unresolved leaf.")
+(deftype MemoryTraceStep
+  [site OwnershipSite
+   function String
+   operation String
+   detail String
+   span (Maybe SourceSpan)])
+
+(doc MemoryVerification "is an opt-in result over one closed specialized call
+graph. Violated means a forbidden effect was proven; Unknown means an
+unresolved leaf prevented proof; Proven means every reachable body satisfied
+the selected policy.")
+(deftype MemoryVerification
+  [target String
+   signature String
+   policy MemoryPolicy
+   status MemoryVerificationStatus
+   reason String
+   trace (Array MemoryTraceStep)])
+
+(deftype MemorySearchResult
+  [status MemoryVerificationStatus
+   reason String
+   trace (Array MemoryTraceStep)])
+
 (doc MemoryAnalysis "derives backend-neutral memory obligations from
 specialized Core. It deliberately reports only facts justified by the current
 IR and primitive manifests; allocator selection and target layout remain later
@@ -593,4 +629,193 @@ can prove absence of effects only for a closed reachable system.")
               @(Array.unsafe-nth &resizes i)
               @(Array.unsafe-nth &frees i)
               @(Array.unsafe-nth &unknown i))))
-        summaries))))
+        summaries)))
+
+  (private policy-forbids?)
+  (hidden policy-forbids?)
+  (defn policy-forbids? [policy effect]
+    (match-ref policy
+      (MemoryPolicy.NoAlloc)
+        (match-ref effect
+          (CoreMemoryEffect.Allocate _) true
+          (CoreMemoryEffect.Resize _ _ _) true
+          _ false)
+      (MemoryPolicy.StaticMemory)
+        (match-ref effect
+          (CoreMemoryEffect.Allocate _) true
+          (CoreMemoryEffect.Resize _ _ _) true
+          (CoreMemoryEffect.Free _) true
+          _ false)))
+
+  (defn memory-effect-name [effect]
+    (match-ref effect
+      (CoreMemoryEffect.Allocate _) (String.copy "allocate")
+      (CoreMemoryEffect.Resize _ _ _) (String.copy "resize")
+      (CoreMemoryEffect.Free _) (String.copy "free")
+      (CoreMemoryEffect.Unknown) (String.copy "unknown")))
+
+  (defn summary-function-name [summary]
+    (String.copy
+      (CoreRef.name
+        (Specialization.reference
+          (SpecializedMemorySummary.specialization summary)))))
+
+  (private direct-policy-violation)
+  (hidden direct-policy-violation)
+  (defn direct-policy-violation [summary policy]
+    (let-do [result (the (Maybe MemoryTraceStep) (Maybe.Nothing))
+             effects (SpecializedMemorySummary.effects summary)
+             function-name (summary-function-name summary)]
+      (for [i 0 (Array.length effects)]
+        (match-ref &result
+          (Maybe.Nothing)
+            (let [effect-site (Array.unsafe-nth effects i)
+                  effect (MemoryEffectSite.effect effect-site)]
+              (when (policy-forbids? policy effect)
+                (set! result
+                  (Maybe.Just
+                    (MemoryTraceStep.init
+                      @(MemoryEffectSite.site effect-site)
+                      (String.copy &function-name)
+                      (memory-effect-name effect)
+                      (String.copy (MemoryEffectSite.source effect-site))
+                      @(MemoryEffectSite.span effect-site))))))
+          (Maybe.Just _) ()))
+      result))
+
+  (private direct-unknown)
+  (hidden direct-unknown)
+  (defn direct-unknown [summary]
+    (let [unresolved (SpecializedMemorySummary.unresolved summary)]
+      (if (Int.> (Array.length unresolved) 0)
+        (let [leaf (Array.unsafe-nth unresolved 0)
+              function-name (summary-function-name summary)]
+          (Maybe.Just
+            (MemorySearchResult.init
+              (MemoryVerificationStatus.Unknown)
+              (String.copy (MemoryUnresolvedLeaf.reason leaf))
+              [(MemoryTraceStep.init
+                 @(MemoryUnresolvedLeaf.site leaf)
+                 function-name
+                 (String.copy "unknown")
+                 (String.copy (MemoryUnresolvedLeaf.callee leaf))
+                 @(MemoryUnresolvedLeaf.span leaf))])))
+        (the (Maybe MemorySearchResult) (Maybe.Nothing)))))
+
+  (private prepend-call-step)
+  (hidden prepend-call-step)
+  (defn prepend-call-step [summary edge child]
+    (let-do [trace (the (Array MemoryTraceStep)
+                         [(MemoryTraceStep.init
+                            @(MemoryCallEdge.site edge)
+                            (summary-function-name summary)
+                            (String.copy "call")
+                            (String.copy (MemoryCallEdge.callee edge))
+                            @(MemoryCallEdge.span edge))])
+             child-trace (MemorySearchResult.trace child)]
+      (for [i 0 (Array.length child-trace)]
+        (Array.push-back! &trace
+          (MemoryTraceStep.copy (Array.unsafe-nth child-trace i))))
+      (MemorySearchResult.init
+        @(MemorySearchResult.status child)
+        (String.copy (MemorySearchResult.reason child))
+        trace)))
+
+  (private verify-summary-index)
+  (hidden verify-summary-index)
+  (sig verify-summary-index
+       (Fn [(Ref (Array SpecializedMemorySummary)) Int (Ref MemoryPolicy)
+            (Ref (Array Bool))] MemorySearchResult))
+  (defn verify-summary-index [summaries index policy visited]
+    (if (or (Int.< index 0) (Int.>= index (Array.length summaries)))
+      (MemorySearchResult.init
+        (MemoryVerificationStatus.Unknown)
+        (String.copy "invalid specialized call edge") [])
+      (if @(Array.unsafe-nth visited index)
+        ;; Direct effects were checked before following the edge into this
+        ;; recursive component; revisiting the component adds no new facts.
+        (MemorySearchResult.init
+          (MemoryVerificationStatus.Proven)
+          (String.copy "recursive edge already checked") [])
+        (let-do [next-visited (Array.copy visited)
+                 _ignored-visit (Array.aset! &next-visited index true)
+                 summary (Array.unsafe-nth summaries index)]
+          (match (direct-policy-violation summary policy)
+            (Maybe.Just step)
+              (MemorySearchResult.init
+                (MemoryVerificationStatus.Violated)
+                (String.concat
+                  &[(String.copy (MemoryTraceStep.operation &step))
+                    @" is forbidden by the selected memory policy"])
+                [step])
+            (Maybe.Nothing)
+              (let-do [violation (the (Maybe MemorySearchResult)
+                                       (Maybe.Nothing))
+                       unknown (direct-unknown summary)
+                       calls (SpecializedMemorySummary.calls summary)]
+                (for [i 0 (Array.length calls)]
+                  (match-ref &violation
+                    (Maybe.Nothing)
+                      (let [edge (Array.unsafe-nth calls i)
+                            child (verify-summary-index
+                                    summaries @(MemoryCallEdge.target edge)
+                                    policy &next-visited)
+                            with-call (prepend-call-step summary edge &child)]
+                        (match-ref (MemorySearchResult.status &with-call)
+                          (MemoryVerificationStatus.Violated)
+                            (set! violation (Maybe.Just with-call))
+                          (MemoryVerificationStatus.Unknown)
+                            (match-ref &unknown
+                              (Maybe.Nothing)
+                                (set! unknown (Maybe.Just with-call))
+                              (Maybe.Just _) ())
+                          (MemoryVerificationStatus.Proven) ()))
+                    (Maybe.Just _) ()))
+                (match violation
+                  (Maybe.Just result) result
+                  (Maybe.Nothing)
+                    (match unknown
+                      (Maybe.Just result) result
+                      (Maybe.Nothing)
+                        (MemorySearchResult.init
+                          (MemoryVerificationStatus.Proven)
+                          (String.copy
+                            "closed specialized call graph satisfies policy")
+                          []))))))))))
+
+  (doc verify "checks every target specialization against a memory policy and
+returns one deterministic result per specialized signature. Proven is relative
+to declared native contracts; it does not claim the foreign implementation has
+been dynamically or mechanically audited.")
+  (defn verify [summaries target policy]
+    (let-do [verifications (the (Array MemoryVerification) [])
+             target-name (String.copy (CoreRef.name target))]
+      (for [i 0 (Array.length summaries)]
+        (let [summary (Array.unsafe-nth summaries i)
+              specialization (SpecializedMemorySummary.specialization summary)]
+          (when (CoreIR.same-ref?
+                  (Specialization.reference specialization)
+                  target)
+            (let-do [visited (the (Array Bool) [])]
+              (for [j 0 (Array.length summaries)]
+                (Array.push-back! &visited false))
+              (let [search (verify-summary-index summaries i policy &visited)]
+                (Array.push-back! &verifications
+                  (MemoryVerification.init
+                    (String.copy &target-name)
+                    (Type.render (Box.peek
+                                   (Specialization.signature specialization)))
+                    @policy
+                    @(MemorySearchResult.status &search)
+                    (String.copy (MemorySearchResult.reason &search))
+                    @(MemorySearchResult.trace &search))))))))
+      (when-do (Int.= 0 (Array.length &verifications))
+        (Array.push-back! &verifications
+          (MemoryVerification.init
+            target-name
+            (String.copy "<absent>")
+            @policy
+            (MemoryVerificationStatus.Unknown)
+            (String.copy "target specialization is absent")
+            [])))
+      verifications))

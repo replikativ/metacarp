@@ -478,14 +478,56 @@
        (map-entry "unknown"
                   (box-bool @(SpecializedMemorySummary.unknown summary)))])))
 
+(defn memory-policy-value [policy]
+  (match-ref policy
+    (MemoryPolicy.NoAlloc) (box-text "noalloc")
+    (MemoryPolicy.StaticMemory) (box-text "static-memory")))
+
+(defn memory-verification-status-value [status]
+  (match-ref status
+    (MemoryVerificationStatus.Proven) (box-text "proven")
+    (MemoryVerificationStatus.Violated) (box-text "violated")
+    (MemoryVerificationStatus.Unknown) (box-text "unknown")))
+
+(defn memory-trace-step-value [step]
+  (let [site (MemoryTraceStep.site step)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "function" (box-text (MemoryTraceStep.function step)))
+       (map-entry "operation" (box-text (MemoryTraceStep.operation step)))
+       (map-entry "detail" (box-text (MemoryTraceStep.detail step)))
+       (map-entry "span" (span-value (MemoryTraceStep.span step)))])))
+
+(defn memory-verification-value [verification]
+  (let-do [trace (the (Array (Box CborValue)) [])
+           source-trace (MemoryVerification.trace verification)]
+    (for [i 0 (Array.length source-trace)]
+      (Array.push-back! &trace
+        (memory-trace-step-value (Array.unsafe-nth source-trace i))))
+    (box-map
+      [(map-entry "target" (box-text (MemoryVerification.target verification)))
+       (map-entry "signature"
+                  (box-text (MemoryVerification.signature verification)))
+       (map-entry "policy"
+                  (memory-policy-value (MemoryVerification.policy verification)))
+       (map-entry "status"
+                  (memory-verification-status-value
+                    (MemoryVerification.status verification)))
+       (map-entry "reason" (box-text (MemoryVerification.reason verification)))
+       (map-entry "trace" (box-values trace))])))
+
 (defn ownership-region-report-value [report]
   (let-do [facts (the (Array (Box CborValue)) [])
            allocations (the (Array (Box CborValue)) [])
            summaries (the (Array (Box CborValue)) [])
+           verifications (the (Array (Box CborValue)) [])
            limitations (the (Array (Box CborValue)) [])
            source-facts (OwnershipRegionReport.facts report)
            source-allocations (OwnershipRegionReport.allocations report)
            source-summaries (OwnershipRegionReport.memory-summaries report)
+           source-verifications
+             (OwnershipRegionReport.memory-verifications report)
            source-limitations (OwnershipRegionReport.limitations report)]
     (for [i 0 (Array.length source-facts)]
       (Array.push-back! &facts
@@ -498,6 +540,10 @@
       (Array.push-back! &summaries
         (specialized-memory-summary-value
           (Array.unsafe-nth source-summaries i))))
+    (for [i 0 (Array.length source-verifications)]
+      (Array.push-back! &verifications
+        (memory-verification-value
+          (Array.unsafe-nth source-verifications i))))
     (for [i 0 (Array.length source-limitations)]
       (Array.push-back! &limitations
         (box-text (Array.unsafe-nth source-limitations i))))
@@ -508,6 +554,7 @@
        (map-entry "facts" (box-values facts))
        (map-entry "allocations" (box-values allocations))
        (map-entry "memory-summaries" (box-values summaries))
+       (map-entry "memory-verifications" (box-values verifications))
        (map-entry "limitations" (box-values limitations))])))
 
 (defn library-artifact-value [artifact]

@@ -365,6 +365,100 @@ directive once there is an output to count lines in.")
 
   (doc system-includes "renders the baseline C headers and ordered,
 deduplicated source-requested system includes.")
+  (defn memory-contract-observer-preamble []
+    (String.copy "
+#ifdef CARP_MEMORY_CONTRACT_TRACE
+/* Test-time falsification support for declared native memory contracts.
+ * Snapshots are deliberately observation evidence, not a formal proof. This
+ * initial C99 implementation is process-global and intended for controlled,
+ * single-threaded contract tests. Native Rust code can report through the same
+ * carp_memory_contract_observe_external ABI. */
+typedef struct {
+  uint64_t allocations;
+  uint64_t resizes;
+  uint64_t frees;
+  uint64_t allocated_bytes;
+  uint64_t resized_bytes;
+} CarpMemoryObservation;
+
+#define CARP_MEMORY_EVENT_ALLOCATE 1
+#define CARP_MEMORY_EVENT_RESIZE 2
+#define CARP_MEMORY_EVENT_FREE 4
+
+static CarpMemoryObservation _carp_memory_observation = {0, 0, 0, 0, 0};
+
+void carp_memory_contract_observe_external(int event, size_t bytes) {
+  if (event == CARP_MEMORY_EVENT_ALLOCATE) {
+    _carp_memory_observation.allocations++;
+    _carp_memory_observation.allocated_bytes += (uint64_t)bytes;
+  } else if (event == CARP_MEMORY_EVENT_RESIZE) {
+    _carp_memory_observation.resizes++;
+    _carp_memory_observation.resized_bytes += (uint64_t)bytes;
+  } else if (event == CARP_MEMORY_EVENT_FREE) {
+    _carp_memory_observation.frees++;
+  }
+}
+
+CarpMemoryObservation carp_memory_contract_snapshot(void) {
+  return _carp_memory_observation;
+}
+
+void carp_memory_contract_reset(void) {
+  CarpMemoryObservation zero = {0, 0, 0, 0, 0};
+  _carp_memory_observation = zero;
+}
+
+int carp_memory_contract_has_allocation(void) {
+  return _carp_memory_observation.allocations != 0;
+}
+
+int carp_memory_contract_has_resize(void) {
+  return _carp_memory_observation.resizes != 0;
+}
+
+int carp_memory_contract_has_free(void) {
+  return _carp_memory_observation.frees != 0;
+}
+
+int carp_memory_contract_check(CarpMemoryObservation before,
+                               unsigned int allowed_events) {
+  CarpMemoryObservation after = carp_memory_contract_snapshot();
+  if (!(allowed_events & CARP_MEMORY_EVENT_ALLOCATE) &&
+      after.allocations != before.allocations) return 0;
+  if (!(allowed_events & CARP_MEMORY_EVENT_RESIZE) &&
+      after.resizes != before.resizes) return 0;
+  if (!(allowed_events & CARP_MEMORY_EVENT_FREE) &&
+      after.frees != before.frees) return 0;
+  return 1;
+}
+
+static void* _carp_memory_contract_malloc(size_t size) {
+  void* result = CARP_MALLOC(size);
+  carp_memory_contract_observe_external(CARP_MEMORY_EVENT_ALLOCATE, size);
+  return result;
+}
+
+static void* _carp_memory_contract_realloc(void* pointer, size_t size) {
+  void* result = CARP_REALLOC(pointer, size);
+  carp_memory_contract_observe_external(CARP_MEMORY_EVENT_RESIZE, size);
+  return result;
+}
+
+static void _carp_memory_contract_free(void* pointer) {
+  carp_memory_contract_observe_external(CARP_MEMORY_EVENT_FREE, 0);
+  CARP_FREE(pointer);
+}
+
+#undef CARP_MALLOC
+#undef CARP_REALLOC
+#undef CARP_FREE
+#define CARP_MALLOC(size) _carp_memory_contract_malloc((size))
+#define CARP_REALLOC(pointer, size) \
+  _carp_memory_contract_realloc((pointer), (size))
+#define CARP_FREE(pointer) _carp_memory_contract_free((pointer))
+#endif
+"))
+
   (defn system-includes [module]
     (let-do [buffer (StringBuf.create)
              seen (the (Array String) [])
@@ -385,6 +479,10 @@ deduplicated source-requested system includes.")
                                           &seen
                                           (Array.unsafe-nth &defaults i)))
           (Result.Error _) ()))
+      ;; This comes after carp_memory.h captures the underlying allocator and
+      ;; before requested Core/native headers and generated templates use the
+      ;; observed CARP_* macros.
+      (StringBuf.append-str &buffer &(memory-contract-observer-preamble))
       (let [requested (BackendModule.system-includes module)
             requested-count (Array.length requested)]
         (for [i 0 requested-count]

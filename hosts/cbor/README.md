@@ -24,6 +24,13 @@ a concrete CARP_MALLOC policy. It does not change protocol version 1 because
 existing operations and encodings are unchanged; clients must opt into the
 explicitly experimental operation.
 
+The report also carries `noalloc` and `static-memory` verification results for
+each specialized target signature. Each is `proven`, `violated`, or `unknown`;
+non-proven results include the deterministic source-anchored call trace. Proven
+is relative to native contracts carried in Core IR. Runtime contract
+observation is a separate falsification layer and does not change the session
+protocol.
+
 Protocol 1 is the first published CBOR transport protocol. Its number is
 independent of `Session.api-version` and the artifact's `format` field; each is
 incremented only when that particular compatibility boundary changes.

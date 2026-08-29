@@ -1,0 +1,18 @@
+(system-include "memory-contract-observer.h")
+
+(register observer-reset
+  (Fn [] ()) "carp_memory_contract_reset" [] [])
+(register observer-allocated?
+  (Fn [] Bool) "carp_memory_contract_has_allocation" [] [])
+(register observer-freed?
+  (Fn [] Bool) "carp_memory_contract_has_free" [] [])
+
+;; This assertion is intentionally false. Runtime observation must falsify it.
+(register violates-declared-noeffect
+  (Fn [] Int) "MemoryContractFixture_violates_noeffect" [] [])
+
+(defn main []
+  (do
+    (observer-reset)
+    (ignore (violates-declared-noeffect))
+    (if (and (observer-allocated?) (observer-freed?)) 0 1)))

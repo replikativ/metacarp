@@ -419,15 +419,19 @@ answer") (Result.Success backend)
 (system-include \"assert.h\")
 1") (Result.Success backend)
       (match (CBackend.system-includes &backend)
-        (Result.Success rendered) (= &rendered "#include <stdbool.h>
-#include <stddef.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <core.h>
-#include <carp_memory.h>
-#include <assert.h>
-")
+        (Result.Success rendered)
+          (and
+            (contains-text? &rendered "#include <carp_memory.h>")
+            (and
+              (contains-text? &rendered
+                              "#ifdef CARP_MEMORY_CONTRACT_TRACE")
+              (and
+                (contains-text? &rendered
+                                "carp_memory_contract_observe_external")
+                (and
+                  (contains-text? &rendered
+                                  "#define CARP_MALLOC(size) _carp_memory_contract_malloc")
+                  (contains-text? &rendered "#include <assert.h>")))))
         (Result.Error _) false) (Result.Error _) false))
 
 (defn rejects-unsafe-system-includes? []
