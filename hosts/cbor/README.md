@@ -13,6 +13,12 @@ rooted native-library emission. Library artifacts use format 2 and carry C,
 the exact ownership plan used by lowering, and host-resolved include/link
 inputs.
 
+The additive `ownership-regions-experimental` operation accepts the same
+single-name payload as `ownership`. It returns conservative function-region,
+handler, escape, and evidence facts plus a `limitations` array. It does not
+change protocol version 1 because existing operations and encodings are
+unchanged; clients must opt into the explicitly experimental operation.
+
 Protocol 1 is the first published CBOR transport protocol. Its number is
 independent of `Session.api-version` and the artifact's `format` field; each is
 incremented only when that particular compatibility boundary changes.

@@ -14,6 +14,13 @@ The revision-2 API provides `Session.api-version`, `Session.create`,
 and implementations can be committed and queried with `Session.upsert`,
 `Session.remove`, and `Session.definitions`. Warm editor queries expose
 ownership plans, macro expansion, completion, and structured documentation.
+
+The additive `Session.experimental-ownership-regions` query projects the
+current ownership actions into provisional function-region, handler, escape,
+and evidence facts. It also returns explicit limitations: the current plan has
+no allocation sites, allocator provenance, nested regions, capacity bounds, or
+promotion actions. The experimental query does not alter `OwnershipPlan`, C
+lowering, or API revision 2.
 `Session.emit-cell` emits a deterministic executable C translation unit without
 mutating the session, while `Session.emit-library` accepts explicit named roots
 and emits the corresponding entry-point-free translation unit for native

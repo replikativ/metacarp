@@ -329,6 +329,38 @@
        (map-entry "type-capabilities" (box-values type-capabilities))
        (map-entry "transfer-requirements" (box-values transfer-requirements))])))
 
+(defn ownership-region-fact-value [fact]
+  (let [site (OwnershipRegionFact.site fact)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "resource"
+                  (resource-value (OwnershipRegionFact.resource fact)))
+       (map-entry "operation" (box-text (OwnershipRegionFact.operation fact)))
+       (map-entry "region" (box-text (OwnershipRegionFact.region fact)))
+       (map-entry "handler" (box-text (OwnershipRegionFact.handler fact)))
+       (map-entry "escape" (box-text (OwnershipRegionFact.escape fact)))
+       (map-entry "evidence" (box-text (OwnershipRegionFact.evidence fact)))
+       (map-entry "span" (span-value (OwnershipRegionFact.span fact)))])))
+
+(defn ownership-region-report-value [report]
+  (let-do [facts (the (Array (Box CborValue)) [])
+           limitations (the (Array (Box CborValue)) [])
+           source-facts (OwnershipRegionReport.facts report)
+           source-limitations (OwnershipRegionReport.limitations report)]
+    (for [i 0 (Array.length source-facts)]
+      (Array.push-back! &facts
+        (ownership-region-fact-value (Array.unsafe-nth source-facts i))))
+    (for [i 0 (Array.length source-limitations)]
+      (Array.push-back! &limitations
+        (box-text (Array.unsafe-nth source-limitations i))))
+    (box-map
+      [(map-entry "name" (box-text (OwnershipRegionReport.name report)))
+       (map-entry "scheme" (box-text (OwnershipRegionReport.scheme report)))
+       (map-entry "experimental" (box-bool true))
+       (map-entry "facts" (box-values facts))
+       (map-entry "limitations" (box-values limitations))])))
+
 (defn library-artifact-value [artifact]
   (let-do [reports (the (Array (Box CborValue)) [])
            ownership (LibraryArtifact.ownership artifact)]
@@ -523,6 +555,18 @@
     (Maybe.Nothing)
       (malformed request-id "ownership payload must contain a definition name")))
 
+(defn handle-ownership-regions-experimental [session request-id payload]
+  (match (payload-text payload 0)
+    (Maybe.Just name)
+      (match (Session.experimental-ownership-regions session &name)
+        (Result.Success report)
+          (send-success request-id (ownership-region-report-value &report))
+        (Result.Error diagnostic)
+          (send-diagnostic request-id &diagnostic))
+    (Maybe.Nothing)
+      (malformed request-id
+                 "ownership-regions-experimental payload must contain a definition name")))
+
 (defn handle-emit-library [session request-id payload]
   (match (payload-text payload 0)
     (Maybe.Nothing)
@@ -569,6 +613,8 @@
     (String.= operation "remove-input")
       (handle-remove-input session request-id payload)
     (String.= operation "ownership") (handle-ownership session request-id payload)
+    (String.= operation "ownership-regions-experimental")
+      (handle-ownership-regions-experimental session request-id payload)
     (String.= operation "emit-library")
       (handle-emit-library session request-id payload)
     (malformed request-id "unknown operation")))

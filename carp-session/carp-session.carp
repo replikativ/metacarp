@@ -57,6 +57,30 @@
    type-capabilities (Array CoreTypeCapability)
    transfer-requirements (Array CoreTransferRequirement)])
 
+(doc OwnershipRegionFact "is an experimental, conservative projection of one
+existing ownership action into the future region vocabulary. It deliberately
+uses strings for the open vocabularies while the semantics are being tested.
+`evidence` is `checked`, `conservative`, or `unknown`; no allocation site or
+allocator provenance is inferred from a delete action.")
+(deftype OwnershipRegionFact
+  [site OwnershipSite
+   resource OwnershipResource
+   operation String
+   region String
+   handler String
+   escape String
+   evidence String
+   span (Maybe SourceSpan)])
+
+(doc OwnershipRegionReport "returns facts justified by the current ownership
+plan plus explicit limitations. This is an additive experimental query, not a
+change to OwnershipPlan or the stable ownership report.")
+(deftype OwnershipRegionReport
+  [name String
+   scheme String
+   facts (Array OwnershipRegionFact)
+   limitations (Array String)])
+
 (deftype LibraryArtifact
   [c String
    ownership (Array OwnershipReport)
@@ -1610,6 +1634,79 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                                 (CoreModule.type-capabilities &core))
                                               (Array.copy
                                                 (CoreModule.transfer-requirements &core)))))))))))
+
+  (private copied-span)
+  (hidden copied-span)
+  (defn copied-span [span]
+    (match-ref span
+      (Maybe.Just source-span) (Maybe.Just (SourceSpan.copy source-span))
+      (Maybe.Nothing) (Maybe.Nothing)))
+
+  (private action-region-fact)
+  (hidden action-region-fact)
+  (defn action-region-fact [name spanned]
+    (let [region (String.concat &[@"function:" (String.copy name)])
+          span (copied-span (SpannedOwnershipAction.span spanned))]
+      (match-ref (SpannedOwnershipAction.action spanned)
+        (OwnershipAction.Move site from to _)
+          (match-ref to
+            (OwnershipResource.Result)
+              (OwnershipRegionFact.init
+                (OwnershipSite.copy site)
+                (OwnershipResource.copy from)
+                (String.copy "move") region
+                (String.copy "unresolved")
+                (String.copy "result")
+                (String.copy "checked") span)
+            _
+              (OwnershipRegionFact.init
+                (OwnershipSite.copy site)
+                (OwnershipResource.copy from)
+                (String.copy "move") region
+                (String.copy "unresolved")
+                (String.copy "unknown")
+                (String.copy "conservative") span))
+        (OwnershipAction.Borrow site _ place)
+          (OwnershipRegionFact.init
+            (OwnershipSite.copy site)
+            (OwnershipResource.copy (OwnershipPlace.root place))
+            (String.copy "borrow") region
+            (String.copy "unresolved")
+            (String.copy "borrowed")
+            (String.copy "conservative") span)
+        (OwnershipAction.Delete site resource _)
+          (OwnershipRegionFact.init
+            (OwnershipSite.copy site)
+            (OwnershipResource.copy resource)
+            (String.copy "delete") region
+            (String.copy "unresolved")
+            (String.copy "local")
+            (String.copy "checked") span))))
+
+  (doc experimental-ownership-regions "derives conservative function-region,
+handler, and escape facts from the existing ownership plan. Allocation sites,
+allocator provenance, nested regions, and promotion remain explicitly unknown;
+the query neither changes lowering nor claims those facts are present.")
+  (defn experimental-ownership-regions [session name]
+    (match (ownership session name)
+      (Result.Error diagnostic) (Result.Error diagnostic)
+      (Result.Success report)
+        (let-do [facts (the (Array OwnershipRegionFact) [])
+                 actions (OwnershipReport.actions &report)]
+          (for [i 0 (Array.length actions)]
+            (Array.push-back! &facts
+              (action-region-fact name (Array.unsafe-nth actions i))))
+          (Result.Success
+            (OwnershipRegionReport.init
+              (String.copy (OwnershipReport.name &report))
+              (String.copy (OwnershipReport.scheme &report))
+              facts
+              [(String.copy
+                 "allocation sites and allocator provenance are unavailable in OwnershipPlan")
+               (String.copy
+                 "the function region is a conservative logical scope, not a physical allocation region")
+               (String.copy
+                 "nested regions, capacity bounds, collection, and promotion are not yet represented")])))))
 
   (private compatible-definition-kind?)
   (hidden compatible-definition-kind?)

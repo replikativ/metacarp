@@ -444,6 +444,52 @@
         ok)
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
+(defn experimental-region-query-is-conservative? []
+  (match (make-session)
+    (Result.Success session)
+      (let [owned (SourceInput.init
+                    (String.copy "definition:regions:owned")
+                    (String.copy
+                      "(defn owns-region-widget [] (let [widget (make-owned-widget)] ()))"))]
+        (match (Session.upsert &session &owned)
+          (Result.Error diagnostic) (diagnostic-false &diagnostic)
+          (Result.Success _)
+            (match (Session.experimental-ownership-regions
+                     &session
+                     "owns-region-widget")
+              (Result.Error diagnostic) (diagnostic-false &diagnostic)
+              (Result.Success report)
+                (let-do [ok true
+                         facts (OwnershipRegionReport.facts &report)]
+                  (when (Int.= 0 (Array.length facts)) (set! ok false))
+                  (when (Int.= 0
+                               (Array.length
+                                 (OwnershipRegionReport.limitations &report)))
+                    (set! ok false))
+                  (for [i 0 (Array.length facts)]
+                    (let [fact (Array.unsafe-nth facts i)]
+                      (unless (String.= (OwnershipRegionFact.region fact)
+                                        "function:owns-region-widget")
+                        (set! ok false))
+                      (when (String.= (OwnershipRegionFact.operation fact)
+                                      "delete")
+                        (unless
+                          (and (String.= (OwnershipRegionFact.handler fact)
+                                         "unresolved")
+                               (and (String.= (OwnershipRegionFact.escape fact)
+                                              "local")
+                                    (String.= (OwnershipRegionFact.evidence fact)
+                                              "checked")))
+                          (set! ok false)))
+                      (match-ref (OwnershipRegionFact.span fact)
+                        (Maybe.Just span)
+                          (unless (String.= (SourceSpan.source-id span)
+                                            "definition:regions:owned")
+                            (set! ok false))
+                        (Maybe.Nothing) (set! ok false))))
+                  ok))))
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn definition-cell-has-structured-report? []
   (match (make-session)
     (Result.Success session)
@@ -1030,6 +1076,9 @@
   (assert-true t
     (ownership-query-tracks-replacement-and-spans?)
     "ownership queries track replacement and return caller-relative spans")
+  (assert-true t
+    (experimental-region-query-is-conservative?)
+    "experimental region queries expose only evidence-backed conservative facts")
   (assert-true t
     (committed-overlay-lifecycle-is-transactional?)
     "upsert, replacement, rollback, removal, and reset are transactional")
