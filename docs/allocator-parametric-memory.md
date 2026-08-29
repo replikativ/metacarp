@@ -196,3 +196,112 @@ record allocation provenance. The next data-producing change should be an
 allocation-site fact keyed by `OwnershipSite`, with an allocator variable
 `alpha`, rather than assigning a concrete arena/GC/affine label prematurely.
 
+## One ledger, several non-interchangeable books
+
+This model should compose with Kontor without turning every low-level fact into
+money or a generic scalar. Kontor's kernel is the right algebra for the
+*recording*: a transaction is a member of the kernel of the sum map, grouped by
+an identity and a commodity. The corresponding memory posting key is:
+
+```text
+(execution-world, memory-book, commodity, allocator-provenance)
+```
+
+where a commodity is a typed resource unit such as bytes, pages, address-space
+bytes, pinned bytes, allocation permits, or a particular device's frames. An
+allocation transfers an amount from `available` (or a capacity liability) to
+`live`; a logical free transfers it from `live` to `discharged`. A handler may
+then transfer `discharged` to `reusable`, `returned-to-parent`, or neither.
+Every transfer balances as a recording act. That does **not** assert a law of
+physics: measured committed/resident bytes can disagree and must be reconciled
+as telemetry with their own evidence and time axes.
+
+Keep at least three parallel books, which must never be silently netted:
+
+- the **authority book** records affine capacity, permits, and who may settle
+  or reclaim them;
+- the **logical book** records owner creation, movement, discharge, and
+  compiler-attributed charge;
+- the **physical book** records reservations, commits, mappings, resident
+  pages, allocator retention, and observations from the runtime or OS.
+
+The account is a coordinate, not the ontology. Allocator, region, world,
+address space, NUMA/device location, call site, and evidence are independent
+dimensions over which the same facts can later be marginalized. An allocation
+site in the compiler is therefore an obligation/fact from which postings may be
+materialized; it is not itself evidence that `malloc` succeeded at runtime.
+
+## Forking worlds without copying resource authority
+
+Dvergr's current world rule is the low-level rule we need too: semantic state
+may be copied or overlaid, but a live capability to settle it remains affine.
+For a resource vector `r`, forking must use an explicit split:
+
+```text
+split : Permit alpha r -> (Permit alpha r_parent,
+                           Permit alpha r_child)
+where r_parent + r_child = r
+```
+
+Copying the permit would counterfeit capacity. Read-only allocator facts and
+immutable allocation history may be shared freely; mutable allocation
+authority, live ownership, and settlement/reclamation authority may not.
+
+World merge consumes the child's settlement capability exactly once. Its
+resource ledger is joined relative to the fork basis: allocation identities
+from the common prefix are shared history, while child-created identities are
+new facts. Equal-looking allocations are not deduplicated unless they have the
+same generative identity and lineage. Discard consumes settlement authority
+and logically discharges child-only owners, but physical reclamation still
+follows each handler's law. Promotion between worlds or allocators is an
+explicit, balanced transfer and may require a physical copy:
+
+```text
+promote : Permit beta n * Own alpha A
+          -> Result(Own beta A * Discharged alpha A, OOM)
+```
+
+This is the memory analogue of Dvergr's whole-world adoption rule. Partial
+promotion requires a real affine partition operation; selecting fields from a
+descriptor does not manufacture independently settleable capabilities.
+
+## Do not collapse the OS layer into `alloc`
+
+The allocator algebra is a convenient middle layer, not the bottom of the
+system. Code suitable for kernels, drivers, embedded runtimes, and language
+bootstrapping needs the storage primitives beneath it to remain expressible:
+
+```text
+reserve/unreserve virtual address ranges
+commit/decommit physical backing
+map/unmap frames and devices
+protect/change cache attributes
+allocate/free physical frames
+pin/unpin and establish DMA visibility
+```
+
+Their facts include byte extent, target ABI layout and alignment, address
+space, page size, permissions, physical/virtual distinction, cacheability,
+mobility, interrupt/safepoint admissibility, failure mode, and provenance.
+`malloc`-like, arena, slab, page, GC, and persistent/COW handlers are algebras
+built above selected subsets of these operations. High-level code can quantify
+over a handler and forget irrelevant details; low-level code can select the
+primitive perspective directly. The perspective change is explicit and may
+carry proof, accounting, and runtime cost.
+
+## Initial allocation-site fact
+
+The first implementation should be deliberately smaller than this complete
+model. It can report backend-proven array allocations with:
+
+```text
+site, fresh allocator variable, region, result resource,
+element type/count, symbolic byte extent/alignment,
+address stability, failure/reclamation policy,
+logical/physical account coordinates, and evidence
+```
+
+Unknown policy fields stay `unresolved`. In particular, current `CARP_MALLOC`
+lowering does not justify claiming recoverable OOM, a concrete allocator, or
+immediate reclamation. Later passes can refine the same fact rather than
+replacing it with an unrelated cost model.

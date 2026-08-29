@@ -17,10 +17,12 @@ ownership plans, macro expansion, completion, and structured documentation.
 
 The additive `Session.experimental-ownership-regions` query projects the
 current ownership actions into provisional function-region, handler, escape,
-and evidence facts. It also returns explicit limitations: the current plan has
-no allocation sites, allocator provenance, nested regions, capacity bounds, or
-promotion actions. The experimental query does not alter `OwnershipPlan`, C
-lowering, or API revision 2.
+and evidence facts. It also reports backend-proven array allocation sites with
+a fresh symbolic allocator provenance, symbolic target layout, logical and
+physical accounting coordinates, and unresolved policy fields. Closure/copy
+allocations, concrete allocator selection, nested regions, collection, and
+promotion remain explicit limitations. The experimental query does not alter
+`OwnershipPlan`, C lowering, or API revision 2.
 `Session.emit-cell` emits a deterministic executable C translation unit without
 mutating the session, while `Session.emit-library` accepts explicit named roots
 and emits the corresponding entry-point-free translation unit for native

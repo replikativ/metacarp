@@ -343,14 +343,57 @@
        (map-entry "evidence" (box-text (OwnershipRegionFact.evidence fact)))
        (map-entry "span" (span-value (OwnershipRegionFact.span fact)))])))
 
+(defn ownership-allocation-fact-value [fact]
+  (let [site (OwnershipAllocationFact.site fact)]
+    (box-map
+      [(map-entry "context" (box-int @(OwnershipSite.context site)))
+       (map-entry "expression" (box-int @(OwnershipSite.expression site)))
+       (map-entry "resource"
+                  (resource-value (OwnershipAllocationFact.resource fact)))
+       (map-entry "operation"
+                  (box-text (OwnershipAllocationFact.operation fact)))
+       (map-entry "allocator"
+                  (box-text (OwnershipAllocationFact.allocator fact)))
+       (map-entry "region" (box-text (OwnershipAllocationFact.region fact)))
+       (map-entry "element-type"
+                  (box-text (OwnershipAllocationFact.element-type fact)))
+       (map-entry "element-count"
+                  (match-ref (OwnershipAllocationFact.element-count fact)
+                    (Maybe.Just count) (box-int @count)
+                    (Maybe.Nothing) (box-null)))
+       (map-entry "byte-extent"
+                  (box-text (OwnershipAllocationFact.byte-extent fact)))
+       (map-entry "alignment"
+                  (box-text (OwnershipAllocationFact.alignment fact)))
+       (map-entry "address-space"
+                  (box-text (OwnershipAllocationFact.address-space fact)))
+       (map-entry "mobility"
+                  (box-text (OwnershipAllocationFact.mobility fact)))
+       (map-entry "failure" (box-text (OwnershipAllocationFact.failure fact)))
+       (map-entry "reclamation"
+                  (box-text (OwnershipAllocationFact.reclamation fact)))
+       (map-entry "logical-account"
+                  (box-text (OwnershipAllocationFact.logical-account fact)))
+       (map-entry "physical-account"
+                  (box-text (OwnershipAllocationFact.physical-account fact)))
+       (map-entry "evidence"
+                  (box-text (OwnershipAllocationFact.evidence fact)))
+       (map-entry "span" (span-value (OwnershipAllocationFact.span fact)))])))
+
 (defn ownership-region-report-value [report]
   (let-do [facts (the (Array (Box CborValue)) [])
+           allocations (the (Array (Box CborValue)) [])
            limitations (the (Array (Box CborValue)) [])
            source-facts (OwnershipRegionReport.facts report)
+           source-allocations (OwnershipRegionReport.allocations report)
            source-limitations (OwnershipRegionReport.limitations report)]
     (for [i 0 (Array.length source-facts)]
       (Array.push-back! &facts
         (ownership-region-fact-value (Array.unsafe-nth source-facts i))))
+    (for [i 0 (Array.length source-allocations)]
+      (Array.push-back! &allocations
+        (ownership-allocation-fact-value
+          (Array.unsafe-nth source-allocations i))))
     (for [i 0 (Array.length source-limitations)]
       (Array.push-back! &limitations
         (box-text (Array.unsafe-nth source-limitations i))))
@@ -359,6 +402,7 @@
        (map-entry "scheme" (box-text (OwnershipRegionReport.scheme report)))
        (map-entry "experimental" (box-bool true))
        (map-entry "facts" (box-values facts))
+       (map-entry "allocations" (box-values allocations))
        (map-entry "limitations" (box-values limitations))])))
 
 (defn library-artifact-value [artifact]

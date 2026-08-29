@@ -490,6 +490,51 @@
                   ok))))
     (Result.Error diagnostic) (diagnostic-false &diagnostic)))
 
+(defn experimental-region-query-reports-array-allocation? []
+  (match (make-session)
+    (Result.Success session)
+      (let [source (SourceInput.init
+                     (String.copy "definition:regions:array")
+                     (String.copy "(defn region-array [] [1 2 3])"))]
+        (match (Session.upsert &session &source)
+          (Result.Error diagnostic) (diagnostic-false &diagnostic)
+          (Result.Success _)
+            (match (Session.experimental-ownership-regions
+                     &session
+                     "region-array")
+              (Result.Error diagnostic) (diagnostic-false &diagnostic)
+              (Result.Success report)
+                (let [allocations (OwnershipRegionReport.allocations &report)]
+                  (and
+                    (Int.= 1 (Array.length allocations))
+                    (let [fact (Array.unsafe-nth allocations 0)]
+                      (and
+                        (String.= (OwnershipAllocationFact.operation fact)
+                                  "array-literal")
+                        (and
+                          (String.= (OwnershipAllocationFact.allocator fact)
+                                    "alpha:0")
+                          (and
+                            (String.= (OwnershipAllocationFact.element-type fact)
+                                      "Int")
+                            (and
+                              (Maybe.= (OwnershipAllocationFact.element-count fact)
+                                       &(Maybe.Just 3))
+                              (and
+                                (String.=
+                                  (OwnershipAllocationFact.logical-account fact)
+                                  "memory.logical.live")
+                                (and
+                                  (String.=
+                                    (OwnershipAllocationFact.physical-account fact)
+                                    "memory.physical.requested")
+                                  (match-ref (OwnershipAllocationFact.span fact)
+                                    (Maybe.Just span)
+                                      (String.= (SourceSpan.source-id span)
+                                                "definition:regions:array")
+                                    (Maybe.Nothing) false)))))))))))))
+    (Result.Error diagnostic) (diagnostic-false &diagnostic)))
+
 (defn definition-cell-has-structured-report? []
   (match (make-session)
     (Result.Success session)
@@ -1079,6 +1124,9 @@
   (assert-true t
     (experimental-region-query-is-conservative?)
     "experimental region queries expose only evidence-backed conservative facts")
+  (assert-true t
+    (experimental-region-query-reports-array-allocation?)
+    "experimental region queries retain backend-proven array allocation facts")
   (assert-true t
     (committed-overlay-lifecycle-is-transactional?)
     "upsert, replacement, rollback, removal, and reset are transactional")

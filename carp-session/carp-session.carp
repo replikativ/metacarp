@@ -72,6 +72,30 @@ allocator provenance is inferred from a delete action.")
    evidence String
    span (Maybe SourceSpan)])
 
+(doc OwnershipAllocationFact "is an experimental allocation-site obligation
+retaining the low-level dimensions needed by later allocator selection and
+resource accounting. `allocator` is a fresh symbolic provenance variable, not
+a claim about the current CARP_MALLOC implementation. Symbolic layout strings
+are target-independent facts awaiting the C ABI layout pass.")
+(deftype OwnershipAllocationFact
+  [site OwnershipSite
+   resource OwnershipResource
+   operation String
+   allocator String
+   region String
+   element-type String
+   element-count (Maybe Int)
+   byte-extent String
+   alignment String
+   address-space String
+   mobility String
+   failure String
+   reclamation String
+   logical-account String
+   physical-account String
+   evidence String
+   span (Maybe SourceSpan)])
+
 (doc OwnershipRegionReport "returns facts justified by the current ownership
 plan plus explicit limitations. This is an additive experimental query, not a
 change to OwnershipPlan or the stable ownership report.")
@@ -79,7 +103,14 @@ change to OwnershipPlan or the stable ownership report.")
   [name String
    scheme String
    facts (Array OwnershipRegionFact)
+   allocations (Array OwnershipAllocationFact)
    limitations (Array String)])
+
+(deftype PreparedOwnership
+  [report OwnershipReport
+   specialized SpecializationModule
+   provenance CoreProvenance
+   reference CoreRef])
 
 (deftype LibraryArtifact
   [c String
@@ -1568,10 +1599,11 @@ runtime, type, interface, implementation, template, and macro environments.")
                      message
                      (CoreProvenance.binding-span provenance reference)))
 
-  (doc ownership "specializes and ownership-plans the requested visible
-definition against the warm inferred environment, returning only that
-definition's moves, borrows, and deletes joined to caller source spans.")
-  (defn ownership [session name]
+  (private prepared-ownership)
+  (hidden prepared-ownership)
+  (doc prepared-ownership "specializes and ownership-plans one visible
+definition once, retaining the specialized tree for experimental analyses.")
+  (defn prepared-ownership [session name]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]
       (match (visible-reference overlay name)
         (Maybe.Nothing)
@@ -1618,7 +1650,8 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                                  &reference))
                     (Result.Success plan)
                       (Result.Success
-                        (OwnershipReport.init (String.copy name)
+                        (PreparedOwnership.init
+                          (OwnershipReport.init (String.copy name)
                                               (scheme-for-reference (SessionOverlay.inferred overlay)
                                                                     &reference)
                                               (target-ownership-actions &plan
@@ -1633,7 +1666,20 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                               (Array.copy
                                                 (CoreModule.type-capabilities &core))
                                               (Array.copy
-                                                (CoreModule.transfer-requirements &core)))))))))))
+                                                (CoreModule.transfer-requirements &core)))
+                          specialized
+                          provenance
+                          reference)))))))))
+
+  (doc ownership "specializes and ownership-plans the requested visible
+definition against the warm inferred environment, returning only that
+definition's moves, borrows, and deletes joined to caller source spans.")
+  (defn ownership [session name]
+    (match (prepared-ownership session name)
+      (Result.Error diagnostic) (Result.Error diagnostic)
+      (Result.Success prepared)
+        (Result.Success
+          (OwnershipReport.copy (PreparedOwnership.report &prepared)))))
 
   (private copied-span)
   (hidden copied-span)
@@ -1683,30 +1729,216 @@ definition's moves, borrows, and deletes joined to caller source spans.")
             (String.copy "local")
             (String.copy "checked") span))))
 
+  (private array-element-name)
+  (hidden array-element-name)
+  (sig array-element-name (Fn [(Ref MonoType)] (Maybe String)))
+  (defn array-element-name [type]
+    (match-ref type
+      (MonoType.Named type-name arguments)
+        (if (and (String.= type-name "Array")
+                 (Int.> (Array.length arguments) 0))
+          (Maybe.Just
+            (Type.render (Box.peek (Array.unsafe-nth arguments 0))))
+          (Maybe.Nothing))
+      _ (Maybe.Nothing)))
+
+  (private literal-int)
+  (hidden literal-int)
+  (defn literal-int [expression]
+    (match-ref expression
+      (SpecializedExpr.IntLit _ _ value) (Maybe.Just @value)
+      _ (Maybe.Nothing)))
+
+  (private allocation-fact)
+  (hidden allocation-fact)
+  (defn allocation-fact [context id operation element count name provenance]
+    (let [extent (match-ref count
+                   (Maybe.Just n)
+                     (String.concat
+                       &[(Int.str @n) @" * sizeof(" (String.copy element) @")"])
+                   (Maybe.Nothing)
+                     (String.concat
+                       &[@"count * sizeof(" (String.copy element) @")"]))]
+      (OwnershipAllocationFact.init
+        (OwnershipSite.init context id)
+        (OwnershipResource.Temporary id)
+        (String.copy operation)
+        (String.concat &[@"alpha:" (Int.str context)])
+        (String.concat &[@"function:" (String.copy name)])
+        (String.copy element)
+        @count
+        extent
+        (String.concat &[@"alignof(" (String.copy element) @")"])
+        (String.copy "unresolved")
+        (String.copy "stable-until-resize-or-free")
+        (String.copy "unresolved-CARP_MALLOC-policy")
+        (String.copy "individual-logical; physical-unresolved")
+        (String.copy "memory.logical.live")
+        (String.copy "memory.physical.requested")
+        (String.copy "lowering-checked")
+        (CoreProvenance.node-span provenance id))))
+
+  (private collect-allocation-facts!)
+  (hidden collect-allocation-facts!)
+  (private collect-allocation-facts-array!)
+  (hidden collect-allocation-facts-array!)
+  (private collect-allocation-facts-branches!)
+  (hidden collect-allocation-facts-branches!)
+  (sig collect-allocation-facts!
+       (Fn [(Ref SpecializedExpr) Int (Ref String) (Ref CoreProvenance)
+            (Ref (Array OwnershipAllocationFact))] ()))
+  (sig collect-allocation-facts-array!
+       (Fn [(Ref (Array (Box SpecializedExpr))) Int (Ref String)
+            (Ref CoreProvenance) (Ref (Array OwnershipAllocationFact))] ()))
+  (sig collect-allocation-facts-branches!
+       (Fn [(Ref (Array SpecializedMatchBranch)) Int (Ref String)
+            (Ref CoreProvenance) (Ref (Array OwnershipAllocationFact))] ()))
+
+  (defn collect-allocation-facts-array! [expressions context name provenance facts]
+    (for [i 0 (Array.length expressions)]
+      (collect-allocation-facts!
+        (Box.peek (Array.unsafe-nth expressions i))
+        context name provenance facts)))
+
+  (defn collect-allocation-facts-branches! [branches context name provenance facts]
+    (for [i 0 (Array.length branches)]
+      (collect-allocation-facts!
+        (Box.peek (SpecializedMatchBranch.body
+                    (Array.unsafe-nth branches i)))
+        context name provenance facts)))
+
+  (defn collect-allocation-facts! [expression context name provenance facts]
+    (match-ref expression
+      (SpecializedExpr.ArrayLit id type elements)
+        (do
+          ;; The C99 backend emits NULL for an empty literal, not malloc(0).
+          (when-do (Int.> (Array.length elements) 0)
+            (match (array-element-name (Box.peek type))
+              (Maybe.Just element)
+                (Array.push-back! facts
+                  (allocation-fact context @id "array-literal" &element
+                                   &(Maybe.Just (Array.length elements))
+                                   name provenance))
+              (Maybe.Nothing) ()))
+          (collect-allocation-facts-array! elements context name provenance facts))
+      (SpecializedExpr.GlobalCall id type reference _ _ arguments)
+        (do
+          ;; These IDs are the resolver's stable allocate/Array.allocate
+          ;; intrinsics. The lowering allocates only when count != 0.
+          (when-do (or (Int.= @(CoreRef.id reference) 14)
+                       (Int.= @(CoreRef.id reference) 15))
+            (match (array-element-name (Box.peek type))
+              (Maybe.Just element)
+                (let [count (if (Int.= (Array.length arguments) 1)
+                              (literal-int
+                                (Box.peek (Array.unsafe-nth arguments 0)))
+                              (the (Maybe Int) (Maybe.Nothing)))]
+                  (match-ref &count
+                    (Maybe.Just n)
+                      (when-do (Int.> @n 0)
+                        (Array.push-back! facts
+                          (allocation-fact context @id "array-allocate"
+                                           &element &count name provenance)))
+                    (Maybe.Nothing)
+                      (Array.push-back! facts
+                        (allocation-fact context @id
+                                         "array-allocate-if-nonzero"
+                                         &element &count name provenance))))
+              (Maybe.Nothing) ()))
+          (collect-allocation-facts-array! arguments context name provenance facts))
+      (SpecializedExpr.Call _ _ callee arguments)
+        (do
+          (collect-allocation-facts! (Box.peek callee)
+                                     context name provenance facts)
+          (collect-allocation-facts-array! arguments context name provenance facts))
+      (SpecializedExpr.Do _ _ expressions)
+        (collect-allocation-facts-array! expressions context name provenance facts)
+      (SpecializedExpr.If _ _ condition then-branch else-branch)
+        (do
+          (collect-allocation-facts! (Box.peek condition)
+                                     context name provenance facts)
+          (collect-allocation-facts! (Box.peek then-branch)
+                                     context name provenance facts)
+          (collect-allocation-facts! (Box.peek else-branch)
+                                     context name provenance facts))
+      (SpecializedExpr.Let _ _ _ value body)
+        (do
+          (collect-allocation-facts! (Box.peek value)
+                                     context name provenance facts)
+          (collect-allocation-facts! (Box.peek body)
+                                     context name provenance facts))
+      (SpecializedExpr.Set _ _ _ value)
+        (collect-allocation-facts! (Box.peek value)
+                                   context name provenance facts)
+      (SpecializedExpr.While _ _ condition body)
+        (do
+          (collect-allocation-facts! (Box.peek condition)
+                                     context name provenance facts)
+          (collect-allocation-facts! (Box.peek body)
+                                     context name provenance facts))
+      (SpecializedExpr.Lambda _ _ _ body)
+        ;; Closure environments are deliberately deferred: allocation depends
+        ;; on capture/lifting facts which this pre-lowering tree does not state.
+        (collect-allocation-facts! (Box.peek body)
+                                   context name provenance facts)
+      (SpecializedExpr.Match _ _ _ scrutinee branches)
+        (do
+          (collect-allocation-facts! (Box.peek scrutinee)
+                                     context name provenance facts)
+          (collect-allocation-facts-branches! branches
+                                              context name provenance facts))
+      (SpecializedExpr.Annotation _ _ inner _)
+        (collect-allocation-facts! (Box.peek inner)
+                                   context name provenance facts)
+      (SpecializedExpr.StaticArrayLit _ _ elements)
+        (collect-allocation-facts-array! elements context name provenance facts)
+      _ ()))
+
+  (private target-allocation-facts)
+  (hidden target-allocation-facts)
+  (defn target-allocation-facts [prepared name]
+    (let-do [facts (the (Array OwnershipAllocationFact) [])
+             specialized (PreparedOwnership.specialized prepared)
+             provenance (PreparedOwnership.provenance prepared)
+             target (PreparedOwnership.reference prepared)
+             bodies (SpecializationModule.bodies specialized)]
+      (for [i 0 (Array.length bodies)]
+        (let [body (Array.unsafe-nth bodies i)]
+          (when (CoreIR.same-ref?
+                  (Specialization.reference
+                    (SpecializedBody.specialization body))
+                  target)
+            (collect-allocation-facts! (Box.peek (SpecializedBody.body body))
+                                       i name provenance &facts))))
+      facts))
+
   (doc experimental-ownership-regions "derives conservative function-region,
-handler, and escape facts from the existing ownership plan. Allocation sites,
-allocator provenance, nested regions, and promotion remain explicitly unknown;
-the query neither changes lowering nor claims those facts are present.")
+handler, and escape facts from the existing ownership plan and backend-proven
+array allocation obligations from the same prepared specialization. Allocator
+selection, nested regions, closure/copy allocation, and promotion remain
+explicitly unknown; the query does not change lowering.")
   (defn experimental-ownership-regions [session name]
-    (match (ownership session name)
+    (match (prepared-ownership session name)
       (Result.Error diagnostic) (Result.Error diagnostic)
-      (Result.Success report)
+      (Result.Success prepared)
         (let-do [facts (the (Array OwnershipRegionFact) [])
-                 actions (OwnershipReport.actions &report)]
+                 report (PreparedOwnership.report &prepared)
+                 actions (OwnershipReport.actions report)]
           (for [i 0 (Array.length actions)]
             (Array.push-back! &facts
               (action-region-fact name (Array.unsafe-nth actions i))))
           (Result.Success
             (OwnershipRegionReport.init
-              (String.copy (OwnershipReport.name &report))
-              (String.copy (OwnershipReport.scheme &report))
+              (String.copy (OwnershipReport.name report))
+              (String.copy (OwnershipReport.scheme report))
               facts
+              (target-allocation-facts &prepared name)
               [(String.copy
-                 "allocation sites and allocator provenance are unavailable in OwnershipPlan")
+                 "allocator provenance is symbolic; selection and capacity are unresolved")
                (String.copy
                  "the function region is a conservative logical scope, not a physical allocation region")
                (String.copy
-                 "nested regions, capacity bounds, collection, and promotion are not yet represented")])))))
+                 "closure/copy allocations, nested regions, collection, and promotion are not yet represented")])))))
 
   (private compatible-definition-kind?)
   (hidden compatible-definition-kind?)

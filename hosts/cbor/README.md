@@ -15,9 +15,12 @@ inputs.
 
 The additive `ownership-regions-experimental` operation accepts the same
 single-name payload as `ownership`. It returns conservative function-region,
-handler, escape, and evidence facts plus a `limitations` array. It does not
-change protocol version 1 because existing operations and encodings are
-unchanged; clients must opt into the explicitly experimental operation.
+handler, escape, and evidence facts, backend-proven array allocation facts,
+and a `limitations` array. Allocation facts retain symbolic allocator,
+layout, logical-account, and physical-account coordinates instead of claiming
+a concrete CARP_MALLOC policy. It does not change protocol version 1 because
+existing operations and encodings are unchanged; clients must opt into the
+explicitly experimental operation.
 
 Protocol 1 is the first published CBOR transport protocol. Its number is
 independent of `Session.api-version` and the artifact's `format` field; each is
