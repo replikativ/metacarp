@@ -329,9 +329,7 @@ deleters are polymorphic over each arity.")
           (OwnershipResource.Binding r) (CoreIR.same-ref? l r)
           _ false)
       (OwnershipResource.Temporary l)
-        (match-ref right
-          (OwnershipResource.Temporary r) (Int.= @l @r)
-          _ false)
+        (match-ref right (OwnershipResource.Temporary r) (Int.= @l @r) _ false)
       (OwnershipResource.Result)
         (match-ref right (OwnershipResource.Result) true _ false)))
 
@@ -344,13 +342,9 @@ deleters are polymorphic over each arity.")
           (Maybe.Just s)
             (if (Int.< @i @s)
               true
-              (match-ref end
-                (Maybe.Just e) (Int.>= @i @e)
-                (Maybe.Nothing) false))
+              (match-ref end (Maybe.Just e) (Int.>= @i @e) (Maybe.Nothing) false))
           (Maybe.Nothing)
-            (match-ref end
-              (Maybe.Just e) (Int.>= @i @e)
-              (Maybe.Nothing) false))
+            (match-ref end (Maybe.Just e) (Int.>= @i @e) (Maybe.Nothing) false))
       (Maybe.Nothing) false))
 
   (private projections-disjoint?)
@@ -413,8 +407,8 @@ half-open slices are proven separate; unknown indices/bounds and mismatched
 projection kinds remain overlapping. A whole-place prefix overlaps every one
 of its subplaces.")
   (defn places-overlap? [left right]
-    (if (not (same-resource? (OwnershipPlace.root left)
-                             (OwnershipPlace.root right)))
+    (if (not
+        (same-resource? (OwnershipPlace.root left) (OwnershipPlace.root right)))
       false
       (let-do [overlap true
                left-projections (OwnershipPlace.projections left)
@@ -422,9 +416,8 @@ of its subplaces.")
                n (Int.min (Array.length left-projections)
                           (Array.length right-projections))]
         (for [i 0 n]
-          (when (projections-disjoint?
-                  (Array.unsafe-nth left-projections i)
-                  (Array.unsafe-nth right-projections i))
+          (when (projections-disjoint? (Array.unsafe-nth left-projections i)
+                                       (Array.unsafe-nth right-projections i))
             (set! overlap false)))
         overlap)))
 
@@ -469,7 +462,8 @@ expression site without dropping compiler-generated actions.")
               id (match-ref action
                 (OwnershipAction.Move site _ _ _)
                   @(OwnershipSite.expression site)
-                (OwnershipAction.Borrow site _ _) @(OwnershipSite.expression site)
+                (OwnershipAction.Borrow site _ _)
+                  @(OwnershipSite.expression site)
                 (OwnershipAction.Delete site _ _)
                   @(OwnershipSite.expression site))]
           (Array.push-back! &result
@@ -487,9 +481,9 @@ the same way as `spanned-actions`.")
         (let [access (Array.unsafe-nth accesses i)
               id @(OwnershipSite.expression (OwnershipAccess.site access))]
           (Array.push-back! &result
-                            (SpannedOwnershipAccess.init
-                              (OwnershipAccess.copy access)
-                              (CoreProvenance.node-span provenance id)))))
+                            (SpannedOwnershipAccess.init (OwnershipAccess.copy access)
+                                                         (CoreProvenance.node-span provenance
+                                                                                   id)))))
       result))
 
   (defn invalid-id [context id reason]
@@ -1935,27 +1929,21 @@ of its owned arguments and must release any it neither returns nor passes on.")
         (match-ref (Array.unsafe-nth actions i)
           (OwnershipAction.Move site from _ _)
             (Array.push-back! &result
-                              (OwnershipAccess.init
-                                (OwnershipSite.copy site)
-                                (OwnershipAccessKind.Move)
-                                (OwnershipPlace.init
-                                  (OwnershipResource.copy from)
-                                  [])))
+                              (OwnershipAccess.init (OwnershipSite.copy site)
+                                                    (OwnershipAccessKind.Move)
+                                                    (OwnershipPlace.init (OwnershipResource.copy from)
+                                                                         [])))
           (OwnershipAction.Borrow site mode place)
             (Array.push-back! &result
-                              (OwnershipAccess.init
-                                (OwnershipSite.copy site)
-                                (OwnershipAccessKind.Borrow
-                                  (OwnershipBorrowMode.copy mode))
-                                (OwnershipPlace.copy place)))
+                              (OwnershipAccess.init (OwnershipSite.copy site)
+                                                    (OwnershipAccessKind.Borrow (OwnershipBorrowMode.copy mode))
+                                                    (OwnershipPlace.copy place)))
           (OwnershipAction.Delete site resource _)
             (Array.push-back! &result
-                              (OwnershipAccess.init
-                                (OwnershipSite.copy site)
-                                (OwnershipAccessKind.Drop)
-                                (OwnershipPlace.init
-                                  (OwnershipResource.copy resource)
-                                  [])))))
+                              (OwnershipAccess.init (OwnershipSite.copy site)
+                                                    (OwnershipAccessKind.Drop)
+                                                    (OwnershipPlace.init (OwnershipResource.copy resource)
+                                                                         [])))))
       result))
 
   (private parameter-mode)
@@ -2001,23 +1989,27 @@ of its owned arguments and must release any it neither returns nor passes on.")
               (match-ref (SpecializedBuiltinSource.payload source)
                 (CoreBuiltinPayload.External _)
                   (let [specialization (SpecializedPrimitive.specialization primitive)]
-                    (match-ref (Box.peek (Specialization.signature specialization))
+                    (match-ref (Box.peek
+                        (Specialization.signature specialization))
                       (MonoType.Function argument-types result-type)
-                        (let-do [parameters (the (Array OwnershipParameterMode) [])]
+                        (let-do [parameters (the (Array OwnershipParameterMode)
+                                                 [])]
                           (for [j 0 (Array.length argument-types)]
                             (Array.push-back! &parameters
-                              (parameter-mode
-                                (Box.peek (Array.unsafe-nth argument-types j))
-                                facts)))
+                                              (parameter-mode
+                                                (Box.peek (Array.unsafe-nth argument-types
+                                                                            j))
+                                                facts)))
                           (Array.push-back! &result
-                            (OwnershipForeignContract.init
-                              (CoreRef.copy (Specialization.reference specialization))
-                              (String.copy (Specialization.symbol specialization))
-                              false
-                              parameters
-                              (signature-result-effect argument-types
-                                                       (Box.peek result-type)
-                                                       facts))))
+                                            (OwnershipForeignContract.init
+                                              (CoreRef.copy
+                                                (Specialization.reference specialization))
+                                              (String.copy (Specialization.symbol specialization))
+                                              false
+                                              parameters
+                                              (signature-result-effect argument-types
+                                                                       (Box.peek result-type)
+                                                                       facts))))
                       _ ()))
                 _ ())
             (Maybe.Nothing) ())))
@@ -2038,23 +2030,24 @@ of its owned arguments and must release any it neither returns nor passes on.")
                               (Array.length parameters))]
             (collect-ref-lifetimes! (Box.peek result-type) &result-lifetimes)
             (for [i 0 n]
-              (let [argument-type (Box.peek (Array.unsafe-nth argument-types i))]
+              (let-do [argument-type (Box.peek (Array.unsafe-nth argument-types
+                                                                 i))]
                 (Array.push-back! &effects
-                                  (OwnershipParameterEffect.init
-                                    i
-                                    (CoreRef.copy (Array.unsafe-nth parameters i))
-                                    (parameter-mode argument-type facts)))
+                                  (OwnershipParameterEffect.init i
+                                                                 (CoreRef.copy (Array.unsafe-nth parameters
+                                                                                                 i))
+                                                                 (parameter-mode argument-type
+                                                                                 facts)))
                 (let-do [argument-lifetimes (the (Array MonoLifetime) [])]
                   (collect-ref-lifetimes! argument-type &argument-lifetimes)
                   (when (any-lifetime-shared? &argument-lifetimes
-                                               &result-lifetimes)
+                                              &result-lifetimes)
                     (Array.push-back! &borrows-from i)))))
             ;; A direct `&parameter` may not carry a unification lifetime in the
             ;; by-value argument type, so retain the proven syntactic origin too.
-            (match (syntactic-borrow-origin
-                     (Box.peek (SpecializedBody.body body))
-                     &(BorrowState.init [] [])
-                     parameters)
+            (match (syntactic-borrow-origin (Box.peek (SpecializedBody.body body))
+                                            &(BorrowState.init [] [])
+                                            parameters)
               (BorrowOrigin.Param owners)
                 (for [j 0 (Array.length &owners)]
                   (for [i 0 n]
@@ -2066,19 +2059,21 @@ of its owned arguments and must release any it neither returns nor passes on.")
                             (set! seen true)))
                         (unless seen (Array.push-back! &borrows-from i))))))
               _ ())
-            (OwnershipFunctionSummary.init
-              context
-              (CoreRef.copy (Specialization.reference specialization))
-              effects
-              (OwnershipResultEffect.init
-                (result-mode (Box.peek result-type) facts)
-                borrows-from)))
+            (OwnershipFunctionSummary.init context
+                                           (CoreRef.copy
+                                             (Specialization.reference specialization))
+                                           effects
+                                           (OwnershipResultEffect.init
+                                             (result-mode (Box.peek result-type)
+                                                          facts)
+                                             borrows-from)))
         _
-          (OwnershipFunctionSummary.init
-            context
-            (CoreRef.copy (Specialization.reference specialization))
-            []
-            (OwnershipResultEffect.init (OwnershipResultMode.Unmanaged) [])))))
+          (OwnershipFunctionSummary.init context
+                                         (CoreRef.copy
+                                           (Specialization.reference specialization))
+                                         []
+                                         (OwnershipResultEffect.init (OwnershipResultMode.Unmanaged)
+                                                                     [])))))
 
   (doc delete-requirements "reports one `DeleteFunction` requirement per
 distinct concrete type deleted by the plan, so the driver can materialize the
