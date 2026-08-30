@@ -65,6 +65,12 @@ borrow, or unique borrow; its result records both ownership class and the
 parameter lifetimes it may retain. These tables are descriptive only: producing
 them does not add a new compiler rejection boundary.
 
+Specialized registered C functions receive the same descriptive treatment in
+`foreign-contracts`. Until explicit declaration syntax is introduced,
+parameters are derived conservatively from their concrete signature: unmanaged
+values copy, owned values transfer, and references are shared borrows. These
+records do not alter calls or C lowering.
+
 ## Identity invariants
 
 Ownership locations are keyed by a concrete specialization context plus the

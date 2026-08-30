@@ -95,6 +95,16 @@ containers which themselves carry borrowed fields.")
    parameters (Array OwnershipParameterEffect)
    result OwnershipResultEffect])
 
+(doc OwnershipForeignContract "describes the signature-derived affine calling
+convention of one specialized external symbol. References default to shared;
+later declaration syntax may refine modes without changing this record.")
+(deftype OwnershipForeignContract
+  [reference CoreRef
+   symbol String
+   declared Bool
+   parameters (Array OwnershipParameterMode)
+   result OwnershipResultEffect])
+
 (doc OwnershipRequirement "records concrete interface work introduced by
 ownership planning. Delete requirements are returned to specialization before
 backend lowering.")
@@ -107,6 +117,7 @@ rewrite the specialized expression tree.")
    actions (Array OwnershipAction)
    accesses (Array OwnershipAccess)
    summaries (Array OwnershipFunctionSummary)
+   foreign-contracts (Array OwnershipForeignContract)
    requirements (Array OwnershipRequirement)])
 
 (doc SpannedOwnershipAction "is one ownership-plan action joined back to its
@@ -1951,6 +1962,59 @@ of its owned arguments and must release any it neither returns nor passes on.")
       (OwnershipClass.Borrowed) (OwnershipResultMode.Borrowed)
       (OwnershipClass.Unmanaged) (OwnershipResultMode.Unmanaged)))
 
+  (private signature-result-effect)
+  (hidden signature-result-effect)
+  (defn signature-result-effect [argument-types result-type facts]
+    (let-do [result-lifetimes (the (Array MonoLifetime) [])
+             borrows-from (the (Array Int) [])]
+      (collect-ref-lifetimes! result-type &result-lifetimes)
+      (for [i 0 (Array.length argument-types)]
+        (let-do [argument-lifetimes (the (Array MonoLifetime) [])]
+          (collect-ref-lifetimes!
+            (Box.peek (Array.unsafe-nth argument-types i))
+            &argument-lifetimes)
+          (when (any-lifetime-shared? &argument-lifetimes &result-lifetimes)
+            (Array.push-back! &borrows-from i))))
+      (OwnershipResultEffect.init (result-mode result-type facts) borrows-from)))
+
+  (private foreign-contracts)
+  (hidden foreign-contracts)
+  (defn foreign-contracts [specialized facts]
+    (let-do [result (the (Array OwnershipForeignContract) [])
+             primitives (SpecializationModule.primitives specialized)]
+      (for [i 0 (Array.length primitives)]
+        (let [primitive (Array.unsafe-nth primitives i)]
+          (match-ref (SpecializedPrimitive.source primitive)
+            (Maybe.Just source)
+              (match-ref (SpecializedBuiltinSource.payload source)
+                (CoreBuiltinPayload.External _)
+                  (let [specialization (SpecializedPrimitive.specialization primitive)]
+                    (match-ref (Box.peek
+                        (Specialization.signature specialization))
+                      (MonoType.Function argument-types result-type)
+                        (let-do [parameters (the (Array OwnershipParameterMode)
+                                                 [])]
+                          (for [j 0 (Array.length argument-types)]
+                            (Array.push-back! &parameters
+                                              (parameter-mode
+                                                (Box.peek (Array.unsafe-nth argument-types
+                                                                            j))
+                                                facts)))
+                          (Array.push-back! &result
+                                            (OwnershipForeignContract.init
+                                              (CoreRef.copy
+                                                (Specialization.reference specialization))
+                                              (String.copy (Specialization.symbol specialization))
+                                              false
+                                              parameters
+                                              (signature-result-effect argument-types
+                                                                       (Box.peek result-type)
+                                                                       facts))))
+                      _ ()))
+                _ ())
+            (Maybe.Nothing) ())))
+      result))
+
   (private function-summary)
   (hidden function-summary)
   (defn function-summary [body context facts]
@@ -2044,7 +2108,7 @@ that are not moved out of their scope. Types are classified from `facts`.")
              actions (the (Array OwnershipAction) [])
              summaries (the (Array OwnershipFunctionSummary) [])
              result (the (Result OwnershipPlan OwnershipError)
-                         (Result.Success (OwnershipPlan.init [] [] [] [] [])))
+                         (Result.Success (OwnershipPlan.init [] [] [] [] [] [])))
              bodies (SpecializationModule.bodies specialized)
              body-count (Array.length bodies)]
       (for [i 0 body-count]
@@ -2140,6 +2204,7 @@ that are not moved out of their scope. Types are classified from `facts`.")
                             all-actions
                             (accesses-from-actions &all-actions)
                             summaries
+                            (foreign-contracts specialized facts)
                             reqs))))
               (Result.Error error) (set! result (Result.Error error))))
         (Result.Error _) ())
