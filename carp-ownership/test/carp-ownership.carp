@@ -40,6 +40,7 @@
                                                             []))]
                                  []
                                  []
+                                 []
                                  [])
         actions (Ownership.spanned-actions &plan &provenance)]
     (and (Int.= 1 (Array.length &actions))
@@ -73,6 +74,7 @@
                                                              (OwnershipPlace.init
                                                                (OwnershipResource.Temporary 100)
                                                                []))]
+                                    []
                                     []
                                     []
                                     [])
@@ -417,6 +419,33 @@
         ok)
     (Result.Error _) false))
 
+(defn foreign-contracts-default-references-to-shared? []
+  (match (prepare-source "(register inspect (Fn [(Ref Int)] Int) \"inspect\")
+(defn call-inspect [x] (inspect &x))
+(call-inspect 1)")
+    (Result.Success plan)
+      (let-do [ok false
+               contracts (OwnershipPlan.foreign-contracts &plan)]
+        (for [i 0 (Array.length contracts)]
+          (let [contract (Array.unsafe-nth contracts i)]
+            (when (String.= (CoreRef.name (OwnershipForeignContract.reference contract))
+                            "inspect")
+              (let [parameters (OwnershipForeignContract.parameters contract)]
+                (set! ok
+                  (and (not @(OwnershipForeignContract.declared contract))
+                       (and (Int.= 1 (Array.length parameters))
+                            (and
+                              (match-ref (Array.unsafe-nth parameters 0)
+                                (OwnershipParameterMode.SharedBorrow) true
+                                _ false)
+                              (match-ref
+                                (OwnershipResultEffect.ownership
+                                (OwnershipForeignContract.result contract))
+                                (OwnershipResultMode.Unmanaged) true
+                                _ false)))))))))
+        ok)
+    (Result.Error _) false))
+
 (defn rejects-escaped-borrow? []
   (Result.error?
     &(prepare-source
@@ -550,6 +579,9 @@
   (assert-true t
     (summarizes-parameter-and-result-contract?)
     "function summaries retain parameter ownership and result borrow relations")
+  (assert-true t
+    (foreign-contracts-default-references-to-shared?)
+    "foreign contracts conservatively derive shared reference parameters")
   (assert-true t
     (rejects-escaped-borrow?)
     "a reference to a local value that escapes its scope is rejected")
