@@ -58,6 +58,13 @@ current planner preserves its existing decisions, while reports serialize the
 borrow mode and root. Later loan checking can consume the structured place
 without changing the ownership-plan protocol again.
 
+The plan also exposes a normalized `accesses` table derived one-for-one from
+move, borrow, and delete actions, plus a `summaries` table for concrete function
+specializations. A summary classifies each parameter as copy, take, shared
+borrow, or unique borrow; its result records both ownership class and the
+parameter lifetimes it may retain. These tables are descriptive only: producing
+them does not add a new compiler rejection boundary.
+
 ## Identity invariants
 
 Ownership locations are keyed by a concrete specialization context plus the

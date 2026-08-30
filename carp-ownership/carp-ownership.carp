@@ -51,6 +51,50 @@ borrows, and deletes.")
   (Borrow [OwnershipSite OwnershipBorrowMode OwnershipPlace])
   (Delete [OwnershipSite OwnershipResource (Box MonoType)]))
 
+(doc OwnershipAccessKind "normalizes planner actions into memory effects.
+Read and Write are reserved so later expression analysis can extend this
+vocabulary without another external protocol change.")
+(deftype OwnershipAccessKind
+  (Read [])
+  (Write [])
+  (Move [])
+  (Borrow [OwnershipBorrowMode])
+  (Drop []))
+
+(deftype OwnershipAccess
+  [site OwnershipSite
+   kind OwnershipAccessKind
+   place OwnershipPlace])
+
+(deftype OwnershipParameterMode
+  (Copy [])
+  (Take [])
+  (SharedBorrow [])
+  (UniqueBorrow []))
+
+(deftype OwnershipParameterEffect
+  [index Int
+   binding CoreRef
+   mode OwnershipParameterMode])
+
+(deftype OwnershipResultMode
+  (Unmanaged [])
+  (Owned [])
+  (Borrowed []))
+
+(doc OwnershipResultEffect "summarizes both the result's memory class and the
+parameter lifetimes it may retain. Keeping these axes separate covers owned
+containers which themselves carry borrowed fields.")
+(deftype OwnershipResultEffect
+  [ownership OwnershipResultMode
+   borrows-from (Array Int)])
+
+(deftype OwnershipFunctionSummary
+  [context Int
+   reference CoreRef
+   parameters (Array OwnershipParameterEffect)
+   result OwnershipResultEffect])
+
 (doc OwnershipRequirement "records concrete interface work introduced by
 ownership planning. Delete requirements are returned to specialization before
 backend lowering.")
@@ -61,12 +105,17 @@ rewrite the specialized expression tree.")
 (deftype OwnershipPlan
   [contexts (Array OwnershipContext)
    actions (Array OwnershipAction)
+   accesses (Array OwnershipAccess)
+   summaries (Array OwnershipFunctionSummary)
    requirements (Array OwnershipRequirement)])
 
 (doc SpannedOwnershipAction "is one ownership-plan action joined back to its
 caller source. Compiler-generated actions are retained with `Nothing` when no
 source node owns their site.")
 (deftype SpannedOwnershipAction [action OwnershipAction
+                                 span (Maybe SourceSpan)])
+
+(deftype SpannedOwnershipAccess [access OwnershipAccess
                                  span (Maybe SourceSpan)])
 
 (deftype OwnershipError [message String])
@@ -416,6 +465,20 @@ expression site without dropping compiler-generated actions.")
                             (SpannedOwnershipAction.init (OwnershipAction.copy action)
                                                          (CoreProvenance.node-span provenance
                                                                                    id)))))
+      result))
+
+  (doc spanned-accesses "joins normalized place accesses to caller source in
+the same way as `spanned-actions`.")
+  (defn spanned-accesses [plan provenance]
+    (let-do [result (the (Array SpannedOwnershipAccess) [])
+             accesses (OwnershipPlan.accesses plan)]
+      (for [i 0 (Array.length accesses)]
+        (let [access (Array.unsafe-nth accesses i)
+              id @(OwnershipSite.expression (OwnershipAccess.site access))]
+          (Array.push-back! &result
+                            (SpannedOwnershipAccess.init
+                              (OwnershipAccess.copy access)
+                              (CoreProvenance.node-span provenance id)))))
       result))
 
   (defn invalid-id [context id reason]
@@ -1853,6 +1916,110 @@ of its owned arguments and must release any it neither returns nor passes on.")
 
   (private delete-requirements)
   (hidden delete-requirements)
+  (private accesses-from-actions)
+  (hidden accesses-from-actions)
+  (defn accesses-from-actions [actions]
+    (let-do [result (the (Array OwnershipAccess) [])]
+      (for [i 0 (Array.length actions)]
+        (match-ref (Array.unsafe-nth actions i)
+          (OwnershipAction.Move site from _ _)
+            (Array.push-back! &result
+                              (OwnershipAccess.init
+                                (OwnershipSite.copy site)
+                                (OwnershipAccessKind.Move)
+                                (OwnershipPlace.init
+                                  (OwnershipResource.copy from)
+                                  [])))
+          (OwnershipAction.Borrow site mode place)
+            (Array.push-back! &result
+                              (OwnershipAccess.init
+                                (OwnershipSite.copy site)
+                                (OwnershipAccessKind.Borrow
+                                  (OwnershipBorrowMode.copy mode))
+                                (OwnershipPlace.copy place)))
+          (OwnershipAction.Delete site resource _)
+            (Array.push-back! &result
+                              (OwnershipAccess.init
+                                (OwnershipSite.copy site)
+                                (OwnershipAccessKind.Drop)
+                                (OwnershipPlace.init
+                                  (OwnershipResource.copy resource)
+                                  [])))))
+      result))
+
+  (private parameter-mode)
+  (hidden parameter-mode)
+  (defn parameter-mode [type facts]
+    (match (OwnershipClassify.classify type facts)
+      (OwnershipClass.Owned) (OwnershipParameterMode.Take)
+      (OwnershipClass.Borrowed) (OwnershipParameterMode.SharedBorrow)
+      (OwnershipClass.Unmanaged) (OwnershipParameterMode.Copy)))
+
+  (private result-mode)
+  (hidden result-mode)
+  (defn result-mode [type facts]
+    (match (OwnershipClassify.classify type facts)
+      (OwnershipClass.Owned) (OwnershipResultMode.Owned)
+      (OwnershipClass.Borrowed) (OwnershipResultMode.Borrowed)
+      (OwnershipClass.Unmanaged) (OwnershipResultMode.Unmanaged)))
+
+  (private function-summary)
+  (hidden function-summary)
+  (defn function-summary [body context facts]
+    (let [specialization (SpecializedBody.specialization body)
+          signature (Box.peek (Specialization.signature specialization))]
+      (match-ref signature
+        (MonoType.Function argument-types result-type)
+          (let-do [effects (the (Array OwnershipParameterEffect) [])
+                   result-lifetimes (the (Array MonoLifetime) [])
+                   borrows-from (the (Array Int) [])
+                   parameters (SpecializedBody.parameters body)
+                   n (Int.min (Array.length argument-types)
+                              (Array.length parameters))]
+            (collect-ref-lifetimes! (Box.peek result-type) &result-lifetimes)
+            (for [i 0 n]
+              (let [argument-type (Box.peek (Array.unsafe-nth argument-types i))]
+                (Array.push-back! &effects
+                                  (OwnershipParameterEffect.init
+                                    i
+                                    (CoreRef.copy (Array.unsafe-nth parameters i))
+                                    (parameter-mode argument-type facts)))
+                (let-do [argument-lifetimes (the (Array MonoLifetime) [])]
+                  (collect-ref-lifetimes! argument-type &argument-lifetimes)
+                  (when (any-lifetime-shared? &argument-lifetimes
+                                               &result-lifetimes)
+                    (Array.push-back! &borrows-from i)))))
+            ;; A direct `&parameter` may not carry a unification lifetime in the
+            ;; by-value argument type, so retain the proven syntactic origin too.
+            (match (syntactic-borrow-origin
+                     (Box.peek (SpecializedBody.body body))
+                     &(BorrowState.init [] [])
+                     parameters)
+              (BorrowOrigin.Param owners)
+                (for [j 0 (Array.length &owners)]
+                  (for [i 0 n]
+                    (when (CoreIR.same-ref? (Array.unsafe-nth &owners j)
+                                            (Array.unsafe-nth parameters i))
+                      (let-do [seen false]
+                        (for [k 0 (Array.length &borrows-from)]
+                          (when (Int.= @(Array.unsafe-nth &borrows-from k) i)
+                            (set! seen true)))
+                        (unless seen (Array.push-back! &borrows-from i))))))
+              _ ())
+            (OwnershipFunctionSummary.init
+              context
+              (CoreRef.copy (Specialization.reference specialization))
+              effects
+              (OwnershipResultEffect.init
+                (result-mode (Box.peek result-type) facts)
+                borrows-from)))
+        _
+          (OwnershipFunctionSummary.init
+            context
+            (CoreRef.copy (Specialization.reference specialization))
+            []
+            (OwnershipResultEffect.init (OwnershipResultMode.Unmanaged) [])))))
+
   (doc delete-requirements "reports one `DeleteFunction` requirement per
 distinct concrete type deleted by the plan, so the driver can materialize the
 matching `delete` interface implementations before backend lowering.")
@@ -1884,8 +2051,9 @@ that are not moved out of their scope. Types are classified from `facts`.")
   (defn prepare [specialized facts]
     (let-do [contexts (the (Array OwnershipContext) [])
              actions (the (Array OwnershipAction) [])
+             summaries (the (Array OwnershipFunctionSummary) [])
              result (the (Result OwnershipPlan OwnershipError)
-                         (Result.Success (OwnershipPlan.init [] [] [])))
+                         (Result.Success (OwnershipPlan.init [] [] [] [] [])))
              bodies (SpecializationModule.bodies specialized)
              body-count (Array.length bodies)]
       (for [i 0 body-count]
@@ -1943,6 +2111,8 @@ that are not moved out of their scope. Types are classified from `facts`.")
                                                      (Box.peek (Specialization.signature instance))))
                                                  (String.copy (Specialization.symbol instance))
                                                  (Array.length &seen))))
+                        (Array.push-back! &summaries
+                                          (function-summary body i facts))
                         (set! actions
                               (append-actions
                                 (append-actions actions
@@ -1977,6 +2147,8 @@ that are not moved out of their scope. Types are classified from `facts`.")
                             (Array.push-back contexts
                                              (OwnershipContext.Roots (Array.length &seen)))
                             all-actions
+                            (accesses-from-actions &all-actions)
+                            summaries
                             reqs))))
               (Result.Error error) (set! result (Result.Error error))))
         (Result.Error _) ())
