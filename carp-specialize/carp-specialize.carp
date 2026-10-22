@@ -1341,11 +1341,11 @@ cannot.")
           (match-ref (Box.peek answer)
             (MonoType.Integer) (Maybe.Nothing)
             (MonoType.Unit) (Maybe.Nothing)
-            other
+            _
               (Maybe.Just
                 (fmt
                   "The main function can only return an `Int` or a unit type `()`, but it got `%s`"
-                  &(Type.render other)))))
+                  &(Type.render (Box.peek answer))))))
       _ (Maybe.Nothing)))
 
   (doc entry-request "seeds the `main` function as a specialization demand so it
