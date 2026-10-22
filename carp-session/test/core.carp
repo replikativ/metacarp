@@ -96,6 +96,60 @@
                 (String.copy (Diagnostic.message &diagnostic))]))
           false))))
 
+(doc plans-ownership-against-core?
+  "Ownership specializes the queried definition against the whole module,
+Core included, so it needs the normalized base inference that emission uses.")
+(defn plans-ownership-against-core? []
+  (let [dir (core-dir)]
+    (match (Session.create &dir)
+      (Result.Success session)
+        (let [definition (SourceInput.init (String.copy "definition:owns-array")
+                                           (String.copy
+                                             "(defn owns-array [] (let [values [1 2 3]] ()))"))]
+          (match (Session.upsert &session &definition)
+            (Result.Success _)
+              (match (Session.ownership &session "owns-array")
+                (Result.Success report)
+                  (let-do [deletes 0]
+                    (for [i 0 (Array.length (OwnershipReport.actions &report))]
+                      (match-ref (SpannedOwnershipAction.action
+                          (Array.unsafe-nth (OwnershipReport.actions &report) i))
+                        (OwnershipAction.Delete _ resource type)
+                          (match-ref resource
+                            (OwnershipResource.Binding reference)
+                              (when (and
+                                  (String.= (CoreRef.name reference) "values")
+                                  (String.= &(Type.render (Box.peek type))
+                                            "(Array Int)"))
+                                (set! deletes (Int.inc deletes)))
+                            _ ())
+                        _ ()))
+                    (Int.= deletes 1))
+                (Result.Error diagnostic)
+                  (do
+                    (IO.println
+                      &(String.concat
+                        &[(String.copy (Diagnostic.phase &diagnostic))
+                          @": "
+                          (String.copy (Diagnostic.message &diagnostic))]))
+                    false))
+            (Result.Error diagnostic)
+              (do
+                (IO.println
+                  &(String.concat
+                    &[(String.copy (Diagnostic.phase &diagnostic))
+                      @": "
+                      (String.copy (Diagnostic.message &diagnostic))]))
+                false)))
+      (Result.Error diagnostic)
+        (do
+          (IO.println
+            &(String.concat
+              &[(String.copy (Diagnostic.phase &diagnostic))
+                @": "
+                (String.copy (Diagnostic.message &diagnostic))]))
+          false))))
+
 (doc copies-shared-closure-captures?
   "Two closures over one owned array. An environment's deleter frees what it
 holds, so storing the array itself in both frees it twice and reads it after
@@ -179,6 +233,9 @@ echoes a top-level one.")
   (assert-true t
     (emits-after-committed-empty-map?)
     "Session.emit-cell specializes Core calls reached through committed values")
+  (assert-true t
+    (plans-ownership-against-core?)
+    "Session.ownership plans a definition in a session with Core")
   (assert-true t
     (copies-shared-closure-captures?)
     "a closure environment owns its captures rather than aliasing them"))
