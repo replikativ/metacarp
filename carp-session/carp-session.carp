@@ -2222,7 +2222,12 @@ it. Optional: emit-cell does it on demand.")
       (Array.push-back! (CompilerSession.analysis session)
                         (normalized-analysis (CompilerSession.base-inferred session)))))
 
-  (defn emit-cell [session input]
+  (private emit-cell-with)
+  (hidden emit-cell-with)
+  (doc emit-cell-with "compiles a transient cell against the committed session:
+as a program with the driver's top-level echo when `library` is false, else as
+a library unit without `main`, rooted at `roots`.")
+  (defn emit-cell-with [session input library roots]
     (let [overlay (Array.unsafe-nth (CompilerSession.overlay session) 0)]
       (match (Surface.parse-input-diagnosed input)
         (Result.Success parsed)
@@ -2265,8 +2270,12 @@ it. Optional: emit-cell does it on demand.")
                                                                                    &inferred)
                                        _m4 (emit-mark! "analysis-appended"
                                                        started)]
-                                (match (CarpCompiler.compile-inferred-module-echoed &complete-core
-                                                                                    &complete-inferred)
+                                (match (if library
+                                    (CarpCompiler.compile-inferred-library-roots &complete-core
+                                                                                 &complete-inferred
+                                                                                 roots)
+                                    (CarpCompiler.compile-inferred-module-echoed &complete-core
+                                                                                 &complete-inferred))
                                   (Result.Success c)
                                     (do
                                       (emit-mark! "compiled" started)
@@ -2283,6 +2292,17 @@ it. Optional: emit-cell does it on demand.")
             (Result.Error error)
               (Result.Error (expand-diagnostic &error (SourceInput.id input))))
         (Result.Error diagnostic) (Result.Error diagnostic))))
+
+  (defn emit-cell [session input]
+    (emit-cell-with session input false &(the (Array String) [])))
+
+  (doc emit-library "compiles a transient cell against the committed session to
+a C translation unit without `main`, rooted at `roots` and checked the way
+`CarpCompiler.compile-inferred-library-roots` checks an embedder's roots: each
+root must name a concrete function, defined by the cell or committed earlier.
+Only the roots are exported. The session is not mutated.")
+  (defn emit-library [session input roots]
+    (emit-cell-with session input true roots))
 
   (private definition-references)
   (hidden definition-references)
