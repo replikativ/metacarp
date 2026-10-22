@@ -1732,8 +1732,13 @@ definition's moves, borrows, and deletes joined to caller source spans.")
                                              (String.copy name)])
                                          &provenance
                                          &reference))
+              ;; specialization reaches into the base too, so it needs every
+              ;; trace normalized, as emit-cell does; the overlay's own
+              ;; inference has no types for the base's expressions
               (match (Specialize.module-with &core
-                                             (SessionOverlay.inferred overlay)
+                                             &(inferred-environment-with-analysis (SessionOverlay.inferred overlay)
+                                                                                  &(session-analysis session
+                                                                                                     overlay))
                                              &requests)
                 (Result.Error error)
                   (Result.Error
