@@ -439,15 +439,20 @@
         (Maybe.Just home) (String.append &home "/.cache/carp/libs")
         (Maybe.Nothing) @"/tmp/carp-libs")))
 
+; checks out into a directory of its own and renames it into place, so a
+; checkout is only ever seen complete: parallel builds that load the same
+; dependency would otherwise read, or initialize, one another's half-made
+; checkout. When another build got there first, its checkout is kept.
 (defn git-install! [dir url tag]
   (ignore
     (System.system
       &(fmt
-        "mkdir -p '%s' && cd '%s' && git init -q && git remote add origin '%s' && git fetch -q --all --tags && git checkout -q '%s'"
-        dir
+        "tmp='%s.tmp.'$$ && rm -rf \"$tmp\" && mkdir -p \"$tmp\" && (cd \"$tmp\" && git init -q && git remote add origin '%s' && git fetch -q --all --tags && git checkout -q '%s') && { [ -d '%s' ] || mv \"$tmp\" '%s'; }; rm -rf \"$tmp\""
         dir
         url
-        tag))))
+        tag
+        dir
+        dir))))
 
 (defn git-checkout-dir [name]
   (String.concat
